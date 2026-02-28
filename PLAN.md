@@ -564,21 +564,58 @@ review:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Agent isolation | Docker containers | Safety — Leonard runs arbitrary code. Blast radius control. |
-| Communication | Redis queue + direct Nelson calls | Queue decouples pipeline stages; Nelson is a utility, not a pipeline step. |
+| Agent isolation | Docker containers (each agent) | Safety — Leonard runs arbitrary code. Blast radius control. |
+| Communication | Redis Streams + dead letter queue | Durable, replayable, supports consumer groups for parallel Leonards. |
+| Nelson integration | Also via Redis (everything through Redis) | Single communication backbone. No direct container-to-container calls. |
 | State storage | Redis + SQLite | Redis for ephemeral/real-time, SQLite for durable data. No infra overhead. |
 | LLM routing | LiteLLM | Single API for 3+ providers. Fallback, retries, streaming built-in. |
+| LLM providers | Claude + GPT-4o + Gemini | Three providers for robust consensus. |
 | Agent framework | PydanticAI | Typed tool use, structured outputs, minimal magic. Maximum control. |
 | Consensus termination | Hybrid (majority → weighted → human) | Balances speed (quick consensus) with accuracy (weighted tiebreak) and safety (human escalation). |
+| Consensus output | Structured decision + free reasoning | JSON envelope for programmatic comparison + freeform reasoning for nuance. |
+| Message protocol | Strict Pydantic models (versioned) | Type-safe serialization/deserialization with validation at every boundary. |
 | Task sizing | Minimum file changes | Speeds up Leonard, simplifies Katherine's review, reduces merge conflicts. |
 | Parallelism | Julius-managed dependency graph | Smart parallelism — not just "run everything at once" but respecting dependencies. |
-| Human review | Adaptive scoring via Nelson | Starts conservative, learns the team's standards over time. |
+| Human review scoring | Nelson consensus (all 3 LLMs score it) | Same rigor as code review. Scores novelty, complexity, risk, AI confidence. |
+| Human review | Adaptive threshold learning | Starts conservative, learns the team's standards from human feedback. |
+| GitHub auth | GitHub App + PAT fallback | GitHub App for orgs (auto-refresh), PAT for personal repos. |
 | Project config | `.ai-team.yaml` per repo | Clean interface between the agent system and any target codebase. |
 | Package management | uv workspaces | Fast, modern Python tooling. Workspace support for monorepo. |
+| Filesystem access | All agents read repo, only Leonard + Richelieu write | Everyone can analyze the codebase. Write permissions are restricted. |
+| Observability UI | TUI (Textual) | Lightweight, no browser, fits dev workflow. |
+| Logging | Everything, always (structlog + JSON) | Full replay capability. Correlation IDs trace across agents. |
+| Cost tracking | Per LLM call, configurable budget limits | Soft limits warn, hard limits halt. Daily hard ceiling as safety net. |
+| Error recovery | Checkpoint + 3 retries + escalate | Resume from last checkpoint, alert human, max 3 retries. |
+| Testing | Record/replay (VCR) + snapshot updates | Deterministic tests without real API calls. Update like snapshot tests. |
+| Dev standards | Strict (ruff + mypy strict + 90%+ coverage) | High quality bar for the system that writes code for others. |
+| Secrets | .env files (gitignored) | Simple, no infrastructure overhead. Per-agent secret scoping. |
+| Deployment | Docker Compose + Makefile | Makefile for dev workflow, Compose for service orchestration. |
+| Dog-fooding | From Phase 7 onward | Use ai-team on itself once pipeline is proven stable. |
 
 ---
 
-## 11. Open Questions & Future Considerations
+## 11. Detailed Specifications
+
+Each area has its own deep-dive spec document:
+
+| Spec | File | Summary |
+|---|---|---|
+| Deployment | [01-deployment.md](docs/specs/01-deployment.md) | Docker Compose, networking, volumes, dynamic Leonard scaling |
+| Repo Connection | [02-repo-connection.md](docs/specs/02-repo-connection.md) | GitHub App + PAT auth, cloning, webhooks, `.ai-team.yaml` full spec |
+| Task Visibility | [03-task-visibility.md](docs/specs/03-task-visibility.md) | TUI (Textual) with pipeline, task, log, consensus, and cost views |
+| Consensus | [04-consensus.md](docs/specs/04-consensus.md) | Nelson deep dive: algorithm, weight learning, prompt templates, cost optimization |
+| Dev Rules | [05-dev-rules.md](docs/specs/05-dev-rules.md) | ruff + mypy strict + 90% coverage, coding conventions, CI pipeline |
+| Logging | [06-logging.md](docs/specs/06-logging.md) | structlog, JSON lines, correlation IDs, event types catalog |
+| Cost Tracking | [07-cost-tracking.md](docs/specs/07-cost-tracking.md) | Per-LLM-call attribution, budget limits (soft/hard), daily ceiling |
+| Error Recovery | [08-error-recovery.md](docs/specs/08-error-recovery.md) | Checkpoints, 3 retries, escalation, idempotency |
+| Security | [09-security.md](docs/specs/09-security.md) | Secrets, container hardening, filesystem permissions, prompt injection defense |
+| Communication | [10-communication.md](docs/specs/10-communication.md) | Redis Streams, consumer groups, message envelopes, dead letter queue |
+| Testing | [11-testing.md](docs/specs/11-testing.md) | Record/replay (VCR), unit/integration/E2E pyramid, CI stages |
+| Data Models | [12-data-models.md](docs/specs/12-data-models.md) | All Pydantic models, SQLite schema, complete type catalog |
+
+---
+
+## 12. Open Questions & Future Considerations
 
 - **Long-term memory**: Should agents build persistent knowledge about a codebase across
   runs? (e.g., "last time we changed this module, tests in X broke")
