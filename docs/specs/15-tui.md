@@ -328,7 +328,7 @@ which publishes to the appropriate Redis Streams for agents to consume.
 
 In addition to the TUI, the system provides visibility through GitHub:
 
-- **Issue labels**: Applied by agents to show task status (see spec 02).
+- **Issue labels**: Applied by agents to show task status (see spec 01).
 - **PR descriptions**: Include a summary of what agents did, which tasks are covered,
   consensus decisions made, and the human review score.
 - **PR comments**: Katherine posts review findings as PR comments.

@@ -345,4 +345,4 @@ The API server supports the following TUI features (see spec 15 for TUI details)
 | 15   | TUI is the primary consumer of the API server. All TUI features map to API endpoints listed above |
 | 09   | Security spec covers authentication hardening, TLS, and access control for the API |
 | 04   | API server reads from Redis Streams to power SSE endpoints |
-| 01   | API server reads/writes Pydantic models and PostgreSQL tables defined in spec 01 |
+| 02   | API server reads/writes Pydantic models and PostgreSQL tables defined in spec 02 |

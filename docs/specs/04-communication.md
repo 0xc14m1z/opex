@@ -221,7 +221,7 @@ class HumanDecisionPayload(BaseModel):
 
 ## Message Flow: Complete Task Lifecycle
 
-For the full 20-step end-to-end pipeline flow, see spec 02.
+For the full 20-step end-to-end pipeline flow, see spec 01.
 
 ```
 1. Julius publishes to `pipeline:X:tasks`:

@@ -1,4 +1,4 @@
-# 02 — Workflow
+# 01 — Workflow
 
 > **Migrated from**: `docs/specs/01-deployment.md` (Branching Model & Repo Lifecycle, Review Flow, Conflict Resolution, GitHub Labels) and `docs/specs/13-orchestrator.md` (Complete Event Flow: End-to-End Pipeline, 20-step walkthrough)
 

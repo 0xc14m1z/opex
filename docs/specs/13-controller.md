@@ -478,7 +478,7 @@ class PipelineFailedPayload(BaseModel):
 
 ## New PostgreSQL Tables
 
-Two new tables added to the schema from spec 01.
+Two new tables added to the schema from spec 02.
 
 ### `pipelines`
 
@@ -944,7 +944,7 @@ agents will eventually produce, but can be unit-tested with mock messages from d
 | Step | Component                                         | Depends on                     |
 |------|---------------------------------------------------|--------------------------------|
 | 1.1  | `controller/config.py`                            | —                              |
-| 1.2  | `controller/state.py` + migrations                | PostgreSQL schema (spec 01)    |
+| 1.2  | `controller/state.py` + migrations                | PostgreSQL schema (spec 02)    |
 | 1.3  | `controller/launcher.py`                          | Docker SDK                     |
 | 1.4  | `controller/watchdog.py`                          | Heartbeat model (spec 08)      |
 | 1.5  | `controller/router.py` — full dispatch table      | 1.2–1.4                        |

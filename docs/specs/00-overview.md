@@ -26,7 +26,7 @@ loop where Claude, GPT, and Gemini cross-review each other until they converge.
 | **Leonard** | Implementer | Takes an execution plan and implements the code changes, runs tests/linting, validates against acceptance criteria. Can run in parallel. See [spec 20](20-leonard.md). |
 | **Katherine** | Code Reviewer | Reviews implementations via Nelson consensus, decides whether human review is needed using adaptive scoring. See [spec 21](21-katherine.md). |
 | **Richelieu** | Git & Workspace Manager | Manages all git operations: feature branches, worktrees, merging, conflict resolution, PR creation. See [spec 18](18-richelieu.md). |
-| **Controller** | Pipeline Orchestrator (no LLM) | Deterministic event router that drives the entire pipeline lifecycle. Spawns and monitors all agent containers. See [spec 13](13-controller.md). |
+| **Orchestrator** | Pipeline Orchestrator (no LLM) | Deterministic event router that drives the entire pipeline lifecycle. Spawns and monitors all agent containers. See [spec 13](13-controller.md). |
 
 ---
 
@@ -42,14 +42,14 @@ graph TB
         subgraph always ["Always-running Services"]
             Redis["Redis<br/>(internal)"]
             PostgreSQL["PostgreSQL<br/>(internal)"]
-            Controller["Controller<br/>(orchestrator)"]
+            Orchestrator["Orchestrator<br/>(pipeline driver)"]
             API["API Server<br/>:8080 (ext)"]
             Loki["Loki<br/>(internal)"]
             Grafana["Grafana<br/>:3000 (ext)"]
             Proxy["Docker Socket Proxy<br/>(internal)"]
         end
 
-        subgraph ephemeral ["Ephemeral Agents (spawned by Controller)"]
+        subgraph ephemeral ["Ephemeral Agents (spawned by Orchestrator)"]
             Nelson["Nelson (xN)"]
             Julius["Julius"]
             Sherlock["Sherlock (xN)"]
@@ -64,12 +64,12 @@ graph TB
     end
 
     TUI -- "REST + SSE" --> API
-    Controller --> Proxy
+    Orchestrator --> Proxy
     Proxy --> ephemeral
     Nelson & Julius & Sherlock & Leonard & Katherine & Richelieu --> Redis
     Nelson & Julius & Sherlock & Leonard & Katherine & Richelieu --> Repo
-    Controller --> Redis
-    Controller --> PostgreSQL
+    Orchestrator --> Redis
+    Orchestrator --> PostgreSQL
     API --> Redis
     API --> PostgreSQL
 ```
@@ -105,8 +105,8 @@ reference for its domain.
 | Spec | File | Summary |
 |------|------|---------|
 | 00 | [`00-overview.md`](00-overview.md) | This document. Vision, agent roster, architecture, tech stack, phases. |
-| 01 | [`01-data-models.md`](01-data-models.md) | All Pydantic models, PostgreSQL schema, complete type catalog. |
-| 02 | [`02-workflow.md`](02-workflow.md) | Pipeline lifecycle, branching model, 20-step event flow, dependency dispatch. |
+| 01 | [`01-workflow.md`](01-workflow.md) | Pipeline lifecycle, branching model, 20-step event flow, dependency dispatch. |
+| 02 | [`02-data-models.md`](02-data-models.md) | All Pydantic models, PostgreSQL schema, complete type catalog. |
 | 03 | [`03-learning-and-principles.md`](03-learning-and-principles.md) | Learning mode, principle system, adaptive review threshold. |
 | 04 | [`04-communication.md`](04-communication.md) | Redis Streams, consumer groups, message envelopes, dead letter queue. |
 | 05 | [`05-infrastructure.md`](05-infrastructure.md) | Docker Compose, networking, volumes, Launcher Protocol, image builds, resource limits. |
@@ -117,7 +117,7 @@ reference for its domain.
 | 10 | [`10-testing.md`](10-testing.md) | Record/replay (VCR), unit/integration/E2E pyramid, CI stages. |
 | 11 | [`11-dev-standards.md`](11-dev-standards.md) | ruff + mypy strict + 90% coverage, coding conventions, CI pipeline. |
 | 12 | [`12-repo-connection.md`](12-repo-connection.md) | GitHub App + PAT auth, cloning, webhooks, `.ai-team.yaml` full spec. |
-| 13 | [`13-controller.md`](13-controller.md) | Pipeline controller: event router, container launcher, watchdog, dependency dispatch. |
+| 13 | [`13-controller.md`](13-controller.md) | Pipeline orchestrator: event router, container launcher, watchdog, dependency dispatch. |
 | 14 | [`14-api-server.md`](14-api-server.md) | REST + SSE API for TUI client, authentication, endpoints. |
 | 15 | [`15-tui.md`](15-tui.md) | TUI (Textual) with pipeline, task, log, consensus, and cost views. |
 | 16 | [`16-nelson.md`](16-nelson.md) | Nelson deep dive: consensus algorithm, weight learning, prompt templates, cost optimization. |
@@ -151,118 +151,195 @@ reference for its domain.
 
 ## 7. Project Structure
 
+All packages use the `ai_team` **namespace package** (PEP 420). Each workspace member
+contains an `ai_team/` directory with **no `__init__.py`** — Python merges them at runtime.
+Tests are colocated with each package. Integration tests live at the top level.
+
 ```
 ai-team/
 ├── PLAN.md
 ├── Makefile
 ├── docker-compose.yml
-├── pyproject.toml                  # Root workspace config (uv)
+├── pyproject.toml                     # Root uv workspace config
 ├── uv.lock
 │
-├── core/                           # Shared library (installable package)
-│   ├── pyproject.toml
-│   └── src/
-│       └── ai_team_core/
-│           ├── __init__.py
-│           ├── llm/
-│           │   ├── __init__.py
-│           │   ├── client.py       # LiteLLM wrapper, provider config
-│           │   └── consensus.py    # Nelson's consensus engine
-│           ├── models/
-│           │   ├── __init__.py
-│           │   ├── task.py         # Task, ExecutionPlan, DependencyGraph
-│           │   ├── review.py       # ReviewResult, HumanReviewScore
-│           │   └── config.py       # .ai-team.yaml schema (Pydantic)
-│           ├── queue/
-│           │   ├── __init__.py
-│           │   └── redis.py        # Redis queue/pub-sub abstraction
-│           ├── state/
-│           │   ├── __init__.py
-│           │   └── store.py        # PostgreSQL state management
-│           ├── migrations/
-│           │   ├── 001_initial_schema.sql
-│           │   └── migrator.py     # Lightweight migration runner
-│           ├── git/
-│           │   ├── __init__.py
-│           │   └── workspace.py    # Git/worktree operations
-│           ├── scoring/
-│           │   ├── __init__.py
-│           │   └── confidence.py   # Adaptive confidence scoring
-│           └── logging/
-│               ├── __init__.py
-│               └── structured.py   # structlog configuration
-│
-├── agents/                          # Each agent is its own package
-│   ├── nelson/
-│   │   ├── pyproject.toml
-│   │   ├── Dockerfile
-│   │   └── src/
-│   │       └── nelson/
+├── core/                              # Shared library
+│   ├── pyproject.toml                 # name = "ai-team-core"
+│   ├── ai_team/                       # Namespace package (no __init__.py)
+│   │   └── core/
+│   │       ├── __init__.py
+│   │       ├── models/
+│   │       │   ├── __init__.py
+│   │       │   ├── task.py            # Task, ExecutionPlan, DependencyGraph
+│   │       │   ├── review.py          # ReviewResult, HumanReviewScore
+│   │       │   └── config.py          # .ai-team.yaml schema
+│   │       ├── queue/
+│   │       │   ├── __init__.py
+│   │       │   └── redis.py           # Redis Streams abstraction
+│   │       ├── state/
+│   │       │   ├── __init__.py
+│   │       │   └── store.py           # PostgreSQL state management (asyncpg)
+│   │       ├── migrations/
+│   │       │   ├── 001_initial.sql
+│   │       │   └── runner.py          # Lightweight migration runner
+│   │       ├── git/
+│   │       │   ├── __init__.py
+│   │       │   └── workspace.py       # Git/worktree operations
+│   │       ├── scoring/
+│   │       │   ├── __init__.py
+│   │       │   └── confidence.py      # Adaptive confidence scoring
+│   │       ├── llm/
+│   │       │   ├── __init__.py
+│   │       │   ├── client.py          # LiteLLM wrapper, provider config
+│   │       │   └── consensus.py       # Nelson's consensus engine
+│   │       └── logging/
 │   │           ├── __init__.py
-│   │           └── agent.py        # Consensus loop orchestration
+│   │           └── setup.py           # structlog configuration
+│   └── tests/
+│       ├── conftest.py
+│       ├── test_models.py
+│       ├── test_queue.py
+│       ├── test_state.py
+│       └── test_migrations.py
+│
+├── orchestrator/                      # Pipeline orchestrator (always-running)
+│   ├── pyproject.toml                 # name = "ai-team-orchestrator"
+│   ├── Dockerfile
+│   ├── ai_team/                       # Namespace package (no __init__.py)
+│   │   └── orchestrator/
+│   │       ├── __init__.py
+│   │       ├── main.py               # Entry point, event loop
+│   │       ├── config.py             # OrchestratorConfig (Pydantic settings)
+│   │       ├── router.py             # Event → handler dispatch table
+│   │       ├── state.py              # Pipeline/task state transitions
+│   │       ├── launcher.py           # Docker container spawning
+│   │       ├── watchdog.py           # Heartbeat monitoring
+│   │       └── graph.py              # DependencyGraph, get_ready_tasks()
+│   └── tests/
+│       ├── conftest.py
+│       ├── test_router.py
+│       ├── test_launcher.py
+│       ├── test_state.py
+│       └── test_graph.py
+│
+├── api/                               # REST + SSE API server (always-running)
+│   ├── pyproject.toml                 # name = "ai-team-api"
+│   ├── Dockerfile
+│   ├── ai_team/                       # Namespace package (no __init__.py)
+│   │   └── api/
+│   │       ├── __init__.py
+│   │       ├── main.py               # FastAPI app
+│   │       ├── config.py
+│   │       ├── auth.py               # Token authentication
+│   │       ├── schemas.py            # Request/response Pydantic models
+│   │       └── routes/
+│   │           ├── __init__.py
+│   │           ├── pipelines.py      # Pipeline CRUD + plan submission
+│   │           ├── tasks.py          # Task status, details
+│   │           ├── events.py         # SSE endpoint (live streaming)
+│   │           └── health.py
+│   └── tests/
+│       ├── conftest.py
+│       ├── test_routes.py
+│       └── test_auth.py
+│
+├── tui/                               # Interactive TUI client (runs on host)
+│   ├── pyproject.toml                 # name = "ai-team-tui" (pip-installable, no Dockerfile)
+│   ├── ai_team/                       # Namespace package (no __init__.py)
+│   │   └── tui/
+│   │       ├── __init__.py
+│   │       ├── app.py                # Textual app entry point
+│   │       ├── config.py             # Connection settings (API URL, token)
+│   │       ├── client.py             # API client (REST + SSE consumer)
+│   │       ├── screens/
+│   │       │   ├── __init__.py
+│   │       │   ├── dashboard.py      # Main overview: pipelines, agents, costs
+│   │       │   ├── pipeline.py       # Single pipeline detail view
+│   │       │   ├── plan.py           # Plan submission (chat-like interface)
+│   │       │   ├── tasks.py          # Task list + dependency graph
+│   │       │   ├── consensus.py      # Nelson consensus debate viewer
+│   │       │   ├── logs.py           # Filterable log viewer
+│   │       │   └── settings.py       # Connection config, preferences
+│   │       └── widgets/
+│   │           ├── __init__.py
+│   │           ├── agent_status.py   # Live agent status indicators
+│   │           ├── dep_graph.py      # Dependency graph visualization
+│   │           ├── log_panel.py      # Scrolling, filterable log panel
+│   │           ├── cost_bar.py       # Budget usage indicator
+│   │           └── streaming.py      # SSE-backed live update widget
+│   └── tests/
+│       ├── conftest.py
+│       ├── test_client.py
+│       └── test_screens.py
+│
+├── agents/                            # Ephemeral agent packages
+│   ├── nelson/
+│   │   ├── pyproject.toml             # name = "ai-team-nelson"
+│   │   ├── Dockerfile
+│   │   ├── ai_team/                   # Namespace package (no __init__.py)
+│   │   │   └── nelson/
+│   │   │       ├── __init__.py
+│   │   │       └── agent.py           # Consensus loop orchestration
+│   │   └── tests/
+│   │       └── test_consensus.py
 │   │
 │   ├── julius/
 │   │   ├── pyproject.toml
 │   │   ├── Dockerfile
-│   │   └── src/
-│   │       └── julius/
-│   │           ├── __init__.py
-│   │           └── agent.py        # Task decomposition + dependency graph
+│   │   ├── ai_team/
+│   │   │   └── julius/
+│   │   │       ├── __init__.py
+│   │   │       └── agent.py           # Task decomposition + dependency graph
+│   │   └── tests/
+│   │       └── test_decomposition.py
 │   │
 │   ├── sherlock/
 │   │   ├── pyproject.toml
 │   │   ├── Dockerfile
-│   │   └── src/
-│   │       └── sherlock/
-│   │           ├── __init__.py
-│   │           └── agent.py        # Codebase analysis + execution planning
+│   │   ├── ai_team/
+│   │   │   └── sherlock/
+│   │   │       ├── __init__.py
+│   │   │       └── agent.py           # Codebase analysis + execution planning
+│   │   └── tests/
+│   │       └── test_enrichment.py
 │   │
 │   ├── leonard/
 │   │   ├── pyproject.toml
 │   │   ├── Dockerfile
-│   │   └── src/
-│   │       └── leonard/
-│   │           ├── __init__.py
-│   │           └── agent.py        # Implementation + testing + validation
+│   │   ├── ai_team/
+│   │   │   └── leonard/
+│   │   │       ├── __init__.py
+│   │   │       └── agent.py           # Implementation + testing + validation
+│   │   └── tests/
+│   │       └── test_implementation.py
 │   │
 │   ├── katherine/
 │   │   ├── pyproject.toml
 │   │   ├── Dockerfile
-│   │   └── src/
-│   │       └── katherine/
-│   │           ├── __init__.py
-│   │           └── agent.py        # Code review + human review scoring
+│   │   ├── ai_team/
+│   │   │   └── katherine/
+│   │   │       ├── __init__.py
+│   │   │       └── agent.py           # Code review + human review scoring
+│   │   └── tests/
+│   │       └── test_review.py
 │   │
 │   └── richelieu/
 │       ├── pyproject.toml
 │       ├── Dockerfile
-│       └── src/
-│           └── richelieu/
-│               ├── __init__.py
-│               └── agent.py        # Git/workspace management
+│       ├── ai_team/
+│       │   └── richelieu/
+│       │       ├── __init__.py
+│       │       └── agent.py           # Git/workspace management
+│       └── tests/
+│           └── test_git_ops.py
 │
-├── dashboard/                       # Observability UI
-│   ├── pyproject.toml
-│   ├── Dockerfile
-│   └── src/
-│       └── dashboard/
-│           ├── __init__.py
-│           ├── app.py              # FastAPI app
-│           ├── routes/
-│           └── templates/
-│
-└── tests/
-    ├── unit/                        # Unit tests per agent
-    │   ├── test_nelson.py
-    │   ├── test_julius.py
-    │   ├── test_sherlock.py
-    │   ├── test_leonard.py
-    │   ├── test_katherine.py
-    │   └── test_richelieu.py
-    ├── integration/                 # Cross-agent pipeline tests
-    │   ├── test_pipeline.py
-    │   └── test_consensus.py
-    └── conftest.py
+└── tests/                             # Integration tests only (cross-package)
+    ├── conftest.py                    # testcontainers fixtures (Redis, PostgreSQL)
+    ├── integration/
+    │   ├── test_pipeline_e2e.py       # Full pipeline: plan → PR
+    │   ├── test_consensus_e2e.py
+    │   └── test_api_sse.py
+    └── cassettes/                     # VCR recordings for LLM calls
 ```
 
 ---
@@ -361,11 +438,11 @@ review:
 - [ ] Set up Makefile (build, test, up, down, logs).
 - [ ] Set up pytest with basic test infrastructure.
 
-### Phase 1 -- Controller: Pipeline Orchestrator (Week 3)
+### Phase 1 -- Orchestrator (Week 3)
 > The conductor. No LLM -- pure infrastructure that launches and monitors everything.
 
-- [ ] Scaffold `controller/` package (config, state tracker, launcher, watchdog, router).
-- [ ] Implement `ControllerConfig` (Pydantic settings from environment).
+- [ ] Scaffold `orchestrator/` package (config, state tracker, launcher, watchdog, router).
+- [ ] Implement `OrchestratorConfig` (Pydantic settings from environment).
 - [ ] Implement `pipelines` and `active_containers` PostgreSQL tables + migrations.
 - [ ] Implement `StateTracker` (pipeline CRUD, container lifecycle, task status).
 - [ ] Implement `Launcher` with Docker SDK (launch, stop, inspect, wait, remove).
@@ -374,7 +451,7 @@ review:
 - [ ] Implement pipeline lifecycle state machine (created → decomposing → in_progress → completing → completed/failed).
 - [ ] Implement dependency graph dispatch (get_ready_tasks → launch Sherlocks on batch).
 - [ ] Implement failure recovery flows (retry, escalate, pause pipeline).
-- [ ] Add controller to Docker Compose (with Docker socket mount).
+- [ ] Add orchestrator to Docker Compose (with Docker socket proxy).
 - [ ] Write unit tests for all components (mock Docker SDK, mock Redis).
 - [ ] Write integration tests with Redis + mock containers.
 
@@ -453,26 +530,41 @@ review:
 - [ ] Write tests for scoring edge cases.
 - [ ] Dockerize Katherine.
 
-### Phase 8 -- End-to-End Integration (Week 12-13)
+### Phase 8 -- API Server (Week 12)
+> The interface between external clients and the system.
+
+- [ ] Scaffold `api/` package with FastAPI.
+- [ ] Implement REST endpoints: pipeline CRUD, task status, plan submission.
+- [ ] Implement SSE endpoint for real-time event streaming.
+- [ ] Implement token authentication.
+- [ ] Define request/response Pydantic schemas.
+- [ ] Add API server to Docker Compose.
+- [ ] Write endpoint tests.
+
+### Phase 9 -- TUI (Week 13-14)
+> Rich interactive terminal interface — the primary way humans interact with the system.
+
+- [ ] Scaffold `tui/` package with Textual.
+- [ ] Implement API client (REST + SSE consumer).
+- [ ] Implement dashboard screen: pipeline overview, agent status, cost summary.
+- [ ] Implement plan submission screen with chat-like interface.
+- [ ] Implement task list with dependency graph visualization.
+- [ ] Implement consensus debate viewer.
+- [ ] Implement real-time log viewer with filtering.
+- [ ] Implement SSE-backed live update widgets.
+- [ ] Build custom widgets (agent status, dep graph, cost bar, log panel).
+- [ ] Make pip-installable (`pip install ai-team-tui`).
+
+### Phase 10 -- End-to-End Integration (Week 15-16)
 > Wire everything together and prove it works.
 
 - [ ] End-to-end integration test with a real repo and real LLM calls.
-- [ ] Verify controller drives full pipeline (plan → PR) with all agents.
+- [ ] Verify orchestrator drives full pipeline (plan → PR) with all agents.
+- [ ] Test TUI → API → orchestrator → agents → PR flow.
 - [ ] Error handling and graceful degradation across the pipeline.
 - [ ] GitHub webhook integration for issue intake.
 
-### Phase 9 -- Dashboard & Observability (Week 14)
-> See what the agents are doing.
-
-- [ ] FastAPI app with basic routes.
-- [ ] Pipeline status view (which agents are active, what they're working on).
-- [ ] Task list view with dependency graph visualization.
-- [ ] Consensus history view (see how LLMs debated).
-- [ ] Confidence score trends over time.
-- [ ] Log viewer with filtering.
-- [ ] Dockerize dashboard.
-
-### Phase 10 -- Hardening & Polish (Week 15+)
+### Phase 11 -- Hardening & Polish (Week 17+)
 > Production-readiness.
 
 - [ ] Rate limiting for LLM API calls.
@@ -512,6 +604,8 @@ and validates documentation quality.
 | GitHub auth | GitHub App + PAT fallback | GitHub App for orgs (auto-refresh), PAT for personal repos. |
 | Project config | `.ai-team.yaml` per repo | Clean interface between the agent system and any target codebase. |
 | Package management | uv workspaces | Fast, modern Python tooling. Workspace support for monorepo. |
+| Package namespace | `ai_team.*` (PEP 420 namespace packages) | Unified imports: `ai_team.core`, `ai_team.orchestrator`, `ai_team.nelson`, etc. Flat layout (no `src/`). |
+| Client architecture | API Server (Docker) + TUI (host) | API is the sole external interface. TUI is a standalone pip-installable Textual app, connects via REST + SSE. |
 | Filesystem access | All agents read repo, only Leonard + Richelieu write | Everyone can analyze the codebase. Write permissions are restricted. |
 | Observability UI | TUI (Textual) + Grafana/Loki | TUI for real-time, Grafana for historical log querying and dashboards. |
 | Logging | Everything, always (structlog + JSON) | Full replay capability. Correlation IDs trace across agents. |
@@ -523,6 +617,6 @@ and validates documentation quality.
 | Deployment | Docker Compose + Makefile | Makefile for dev workflow, Compose for service orchestration. |
 | Log aggregation | Grafana + Loki | Docker logging driver ships all logs to Loki. Zero-config per agent. |
 | LLM config | .ai-team.yaml (not env vars) | Target repo owner decides model preferences. Secrets (.env) separate from config. |
-| Health checks | Redis heartbeats | No HTTP servers in agents. Controller watchdog monitors heartbeats. |
+| Health checks | Redis heartbeats | No HTTP servers in agents. Orchestrator watchdog monitors heartbeats. |
 | DB migrations | Numbered SQL files + runner | Simple, no heavy deps (no Alembic). Works with asyncpg. |
 | Dog-fooding | Once stable | Prove the system by rebuilding ai-team in a fresh repo using the documentation as input. |

@@ -10,8 +10,8 @@ architecture diagram, tech stack, project structure, and implementation phases.
 | Spec | File | Summary |
 |------|------|---------|
 | 00 | [00-overview.md](docs/specs/00-overview.md) | Vision, agent roster, architecture, tech stack, design decisions, phases |
-| 01 | [01-data-models.md](docs/specs/01-data-models.md) | All Pydantic models, PostgreSQL schema, complete type catalog |
-| 02 | [02-workflow.md](docs/specs/02-workflow.md) | Pipeline lifecycle, branching model, 20-step event flow, dependency dispatch |
+| 01 | [01-workflow.md](docs/specs/01-workflow.md) | Pipeline lifecycle, branching model, 20-step event flow, dependency dispatch |
+| 02 | [02-data-models.md](docs/specs/02-data-models.md) | All Pydantic models, PostgreSQL schema, complete type catalog |
 | 03 | [03-learning-and-principles.md](docs/specs/03-learning-and-principles.md) | Learning mode, principle system, adaptive review threshold |
 | 04 | [04-communication.md](docs/specs/04-communication.md) | Redis Streams, consumer groups, message envelopes, dead letter queue |
 | 05 | [05-infrastructure.md](docs/specs/05-infrastructure.md) | Docker Compose, networking, volumes, Launcher Protocol, image builds, resource limits |

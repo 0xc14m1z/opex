@@ -12,9 +12,9 @@ training phase), the principle system (how learnings are stored and applied),
 and the adaptive review threshold (how the system calibrates when to escalate
 to humans).
 
-For the review flow that triggers learning, see spec 02.
+For the review flow that triggers learning, see spec 01.
 For Katherine's review scoring, see spec 21.
-For the data models (PostgreSQL tables, Pydantic models), see spec 01.
+For the data models (PostgreSQL tables, Pydantic models), see spec 02.
 
 ---
 

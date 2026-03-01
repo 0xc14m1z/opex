@@ -65,7 +65,7 @@ Richelieu is one of only two agents with write access to the filesystem
 ## Algorithm / Process
 
 Richelieu implements the following operations. For the full branching model,
-see spec 02 (Branching Model & Repo Lifecycle). This spec describes **how**
+see spec 01 (Branching Model & Repo Lifecycle). This spec describes **how**
 Richelieu implements each operation.
 
 ### Operation: `create_feature_branch`
@@ -136,7 +136,7 @@ Triggered when a task PR merges and other in-progress task branches need updatin
 
 ## Branching Structure
 
-For full details, see spec 02 (Branching Model & Repo Lifecycle). Summary:
+For full details, see spec 01 (Branching Model & Repo Lifecycle). Summary:
 
 ```
 main -------------------------------------------------------

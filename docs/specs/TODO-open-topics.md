@@ -79,7 +79,7 @@ client layer (retry, cost callbacks, streaming). See specs 05, 04, 07.
 
 ### ~~13. Database Migrations~~ — RESOLVED
 Numbered SQL files in `core/migrations/` + lightweight Python runner (~50 LOC) tracking
-applied migrations in a `schema_migrations` table. See spec 01.
+applied migrations in a `schema_migrations` table. See spec 02.
 
 ### ~~14. Redis Queue Abstraction~~ — RESOLVED
 Medium-thickness typed wrapper: auto MessageEnvelope serialization, async generators for

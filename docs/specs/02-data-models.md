@@ -1,4 +1,4 @@
-# 01 — Data Models
+# 02 — Data Models
 
 > **Migrated from**: `docs/specs/12-data-models.md` (all content) with additions from `docs/specs/01-deployment.md` (principles, learning_conversations, review_threshold_history tables, and pipelines table extensions)
 

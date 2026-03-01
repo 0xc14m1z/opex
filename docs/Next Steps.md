@@ -19,20 +19,10 @@
   (learning mode, principles, API server, TUI architecture, branching/PR model).
   All decisions documented and migrated into the appropriate specs.
 
-### Pending numbering fix
+### ~~Pending numbering fix~~ — DONE
 
-**Swap specs 01 and 02**: Workflow should come before Data Models because the
-workflow describes how the system works before diving into data structures.
-
-Current:
-- `01-data-models.md`
-- `02-workflow.md`
-
-Should be:
-- `01-workflow.md`
-- `02-data-models.md`
-
-**Action**: Rename files, update headings, fix cross-references in all 22 specs.
+Specs 01 and 02 swapped. Workflow is now `01-workflow.md`, Data Models is now
+`02-data-models.md`. All cross-references updated across all 22 specs.
 
 ---
 
@@ -44,8 +34,8 @@ identify gaps, clarify details, and resolve open questions.
 | Spec | Status | Notes |
 |------|--------|-------|
 | 00 Overview | **Reviewed** | Done. Mermaid diagrams, final spec index. |
-| 01 Workflow (currently 02) | **Next up** | Review the pipeline flow, branching model, PR flow. Verify consistency with controller (13) and Richelieu (18). |
-| 02 Data Models (currently 01) | Needs review | Verify all tables match decisions. Add any missing schemas from workflow/learning discussions. |
+| 01 Workflow | **Next up** | Review the pipeline flow, branching model, PR flow. Verify consistency with controller (13) and Richelieu (18). |
+| 02 Data Models | Needs review | Verify all tables match decisions. Add any missing schemas from workflow/learning discussions. |
 | 03 Learning & Principles | Needs review | Rich content from our discussion. Verify Extract→Replay→Verify loop is fully specified. |
 | 04 Communication | Needs review | Migrated from old spec 10. Check message types match controller routing table. |
 | 05 Infrastructure | Needs review | Migrated from old spec 01. Docker Compose is canonical. Check for consistency. |
