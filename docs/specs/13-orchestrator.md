@@ -1,14 +1,14 @@
-# 13 — Controller (Pipeline Orchestrator)
+# 13 — Orchestrator (Pipeline Orchestrator)
 
-> **Migrated from**: `docs/specs/13-orchestrator.md` (Overview, Design Principles, Project Structure, Core Components, Routing Table, Message Types, PostgreSQL Tables, Failure Scenarios, Configuration, Testing, Build Order) and `docs/specs/01-deployment.md` (Launcher Protocol, Logging for Ephemeral Agents, Secret Scoping, Controller Health & Recovery)
+> **Migrated from**: `docs/specs/13-orchestrator.md` (Overview, Design Principles, Project Structure, Core Components, Routing Table, Message Types, PostgreSQL Tables, Failure Scenarios, Configuration, Testing, Build Order) and `docs/specs/01-deployment.md` (Launcher Protocol, Logging for Ephemeral Agents, Secret Scoping, Orchestrator Health & Recovery)
 
 ## Overview
 
-The **controller** is a deterministic Python service (no LLM) that owns the end-to-end
+The **orchestrator** is a deterministic Python service (no LLM) that owns the end-to-end
 pipeline flow. It watches Redis Streams for lifecycle events and launches/monitors agent
 containers via the Docker SDK. It is the answer to "who is the conductor?"
 
-The controller is **not** an agent — it has no PydanticAI dependency, makes no LLM calls,
+The orchestrator is **not** an agent — it has no PydanticAI dependency, makes no LLM calls,
 and contains no prompts. It is a lightweight event router + container launcher (~hundreds
 of lines of code).
 
@@ -16,15 +16,15 @@ of lines of code).
 
 ## Design Principles
 
-1. **No LLM calls** — the controller is pure orchestration logic.
-2. **Single writer for pipeline state** — only the controller transitions pipeline status.
+1. **No LLM calls** — the orchestrator is pure orchestration logic.
+2. **Single writer for pipeline state** — only the orchestrator transitions pipeline status.
 3. **All agents are ephemeral** — every agent (Nelson, Julius, Sherlock, Leonard,
-   Katherine, Richelieu) runs as a one-shot container. The controller launches them,
+   Katherine, Richelieu) runs as a one-shot container. The orchestrator launches them,
    monitors them, and cleans up after them. No agents are defined in `docker-compose.yml`.
 4. **Horizontal scaling via spawning** — when multiple consensus requests or git
-   operations arrive, the controller spawns multiple Nelson or Richelieu instances.
+   operations arrive, the orchestrator spawns multiple Nelson or Richelieu instances.
    Richelieu operations on the same branch are serialized; everything else runs in parallel.
-5. **The dependency graph lives here** — on each `branch_merged` event the controller
+5. **The dependency graph lives here** — on each `branch_merged` event the orchestrator
    evaluates `DependencyGraph.get_ready_tasks()` directly. No need to spin up Julius
    just to read state.
 6. **Pluggable container runtime** — the Launcher has a backend interface (Docker SDK,
@@ -36,21 +36,21 @@ of lines of code).
 ## Project Structure
 
 ```
-controller/
+orchestrator/
 ├── pyproject.toml
 ├── Dockerfile
 └── src/
-    └── controller/
+    └── orchestrator/
         ├── __init__.py
         ├── main.py              # Entrypoint: connect to Redis, start router loop
         ├── router.py            # Event → handler dispatch table
         ├── launcher.py          # Docker SDK: run/stop/inspect containers
         ├── watchdog.py          # Heartbeat monitoring, dead container detection
         ├── state.py             # Pipeline + container state (PostgreSQL)
-        └── config.py            # ControllerConfig (Pydantic settings)
+        └── config.py            # OrchestratorConfig (Pydantic settings)
 ```
 
-The controller is a **uv workspace member** alongside `core/` and each agent package.
+The orchestrator is a **uv workspace member** alongside `core/` and each agent package.
 It depends on `ai-team-core` for shared models (DependencyGraph, TaskStatus, MessageEnvelope).
 
 ---
@@ -72,8 +72,8 @@ class Router:
         """Main loop: XREADGROUP on all pipeline streams + system streams."""
         while True:
             messages = await self.redis.xreadgroup(
-                group="controller",
-                consumer="controller-1",
+                group="orchestrator",
+                consumer="orchestrator-1",
                 streams=self.watched_streams(),
                 block=5000,  # ms
             )
@@ -82,13 +82,13 @@ class Router:
                     envelope = MessageEnvelope.model_validate_json(data[b"payload"])
                     handler = self.handlers[stream][envelope.message_type]
                     await handler(envelope)
-                    await self.redis.xack(stream, "controller", msg_id)
+                    await self.redis.xack(stream, "orchestrator", msg_id)
 ```
 
 ### 2. Launcher (`launcher.py`)
 
 Manages ephemeral agent containers via the Launcher Protocol (defined below).
-The controller uses the Launcher to create, monitor, and clean up agent containers.
+The orchestrator uses the Launcher to create, monitor, and clean up agent containers.
 See spec 05 for the Docker Compose infrastructure that these containers run on.
 
 ```python
@@ -171,7 +171,7 @@ class StateTracker:
 
 > **Migrated from**: `docs/specs/01-deployment.md` — Launcher Protocol section
 
-The controller's `Launcher` class is the key abstraction for container management.
+The orchestrator's `Launcher` class is the key abstraction for container management.
 It has a pluggable backend to support different container runtimes.
 
 **This is the canonical definition.**
@@ -225,7 +225,7 @@ class Launcher(Protocol):
 | Volumes           | Per agent filesystem access rules (see spec 05 Volumes section) |
 | Environment       | Filtered secrets (see Secret Scoping below) + `PIPELINE_ID` + `TASK_ID` + agent-specific vars |
 | Name              | `ai-team-{agent}-{pipeline_id[:8]}-{task_id[:8]}`           |
-| Restart policy    | `no` (the controller handles retries)                        |
+| Restart policy    | `no` (the orchestrator handles retries)                        |
 | Labels            | `ai-team.agent={agent}`, `ai-team.pipeline={pipeline_id}`, `ai-team.task={task_id}` |
 | Resource limits   | Per-agent defaults merged with `.ai-team.yaml` overrides (see spec 05) |
 | Log config        | Loki logging driver (see Logging for Ephemeral Agents below) |
@@ -351,11 +351,11 @@ def filter_env(self, agent: AgentName, full_env: dict) -> dict:
 
 ## Event → Container Routing Table
 
-The controller's full dispatch table. Every message type from spec 04 is accounted for.
+The orchestrator's full dispatch table. Every message type from spec 04 is accounted for.
 
-### Pipeline Events (controller acts on)
+### Pipeline Events (orchestrator acts on)
 
-| Event (message_type)       | Source Stream                  | Controller Action                                         |
+| Event (message_type)       | Source Stream                  | Orchestrator Action                                         |
 |----------------------------|-------------------------------|-----------------------------------------------------------|
 | `pipeline_created`         | `system:pipelines`            | Create pipeline record; spawn Richelieu (`create_feature_branch`); then spawn Julius |
 | `decomposition_complete`   | `pipeline:{id}:tasks`         | Store dependency graph; emit `batch_dispatched`; spawn Sherlocks for ready tasks |
@@ -371,18 +371,18 @@ The controller's full dispatch table. Every message type from spec 04 is account
 | `pr_opened`                | `pipeline:{id}:git_ops`       | Mark pipeline `completed`; emit `pipeline_completed`      |
 | `pipeline_failed`          | (self-emitted)                | Mark pipeline `failed`; alert human; preserve state       |
 
-### Events the Controller Observes (but doesn't act on)
+### Events the Orchestrator Observes (but doesn't act on)
 
 | Event (message_type)       | Source Stream                  | Notes                                                     |
 |----------------------------|-------------------------------|-----------------------------------------------------------|
-| `git_response`             | `pipeline:{id}:git_ops`       | Consumed by controller to track Richelieu results         |
+| `git_response`             | `pipeline:{id}:git_ops`       | Consumed by orchestrator to track Richelieu results         |
 | `consensus_response`       | `pipeline:{id}:consensus_resp`| Consumed by the agent that requested consensus            |
-| `rework_requested`         | `pipeline:{id}:reviews`       | Controller sees `review_result:changes_requested` instead |
-| `human_decision`           | `human_input`                 | TUI → agents directly; controller observes for state sync |
+| `rework_requested`         | `pipeline:{id}:reviews`       | Orchestrator sees `review_result:changes_requested` instead |
+| `human_decision`           | `human_input`                 | TUI → agents directly; orchestrator observes for state sync |
 
 ### System Events
 
-| Event (message_type)       | Source Stream                  | Controller Action                                         |
+| Event (message_type)       | Source Stream                  | Orchestrator Action                                         |
 |----------------------------|-------------------------------|-----------------------------------------------------------|
 | `heartbeat`                | `status`                      | Watchdog updates last-seen timestamps                     |
 | `container_exited`         | (Docker event watcher)        | Watchdog evaluates exit code → retry or escalate          |
@@ -391,7 +391,7 @@ The controller's full dispatch table. Every message type from spec 04 is account
 
 ## New Message Types
 
-Six new message types introduced by the controller. All use the standard `MessageEnvelope`
+Six new message types introduced by the orchestrator. All use the standard `MessageEnvelope`
 from spec 04.
 
 ### `pipeline_created`
@@ -421,7 +421,7 @@ class DecompositionCompletePayload(BaseModel):
 
 ### `batch_dispatched`
 
-Published by the controller when it launches a batch of Sherlocks.
+Published by the orchestrator when it launches a batch of Sherlocks.
 
 ```python
 class BatchDispatchedPayload(BaseModel):
@@ -434,7 +434,7 @@ class BatchDispatchedPayload(BaseModel):
 
 ### `all_tasks_complete`
 
-Published by the controller when every task in the pipeline reaches `completed`.
+Published by the orchestrator when every task in the pipeline reaches `completed`.
 
 ```python
 class AllTasksCompletePayload(BaseModel):
@@ -446,7 +446,7 @@ class AllTasksCompletePayload(BaseModel):
 
 ### `pipeline_completed`
 
-Published by the controller after the PR is opened successfully.
+Published by the orchestrator after the PR is opened successfully.
 
 ```python
 class PipelineCompletedPayload(BaseModel):
@@ -461,7 +461,7 @@ class PipelineCompletedPayload(BaseModel):
 
 ### `pipeline_failed`
 
-Published by the controller when the pipeline cannot continue.
+Published by the orchestrator when the pipeline cannot continue.
 
 ```python
 class PipelineFailedPayload(BaseModel):
@@ -546,24 +546,24 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
  1. Human submits plan via TUI/CLI
     → TUI publishes `pipeline_created` to `system:pipelines`
 
- 2. Controller receives `pipeline_created`
+ 2. Orchestrator receives `pipeline_created`
     → Creates pipeline record in PostgreSQL (status: CREATED)
     → Spawns Richelieu to create feature branch
     → Richelieu publishes `git_response` with branch name, exits
 
- 3. Controller receives `git_response` (feature branch ready)
+ 3. Orchestrator receives `git_response` (feature branch ready)
     → Updates pipeline status → DECOMPOSING
     → Spawns Julius container (PIPELINE_ID env var)
 
  4. Julius analyzes codebase, decomposes plan into tasks
     → Publishes `consensus_request` to `pipeline:{id}:consensus`
-    → Controller spawns Nelson for validation
+    → Orchestrator spawns Nelson for validation
     → Nelson publishes `consensus_response`, exits
     → Julius publishes all `task_created` messages to `pipeline:{id}:tasks`
     → Julius publishes `decomposition_complete` to `pipeline:{id}:tasks`
     → Julius container exits
 
- 5. Controller receives `decomposition_complete`
+ 5. Orchestrator receives `decomposition_complete`
     → Stores DependencyGraph in PostgreSQL
     → Updates pipeline status → IN_PROGRESS
     → Calls `graph.get_ready_tasks()` to find tasks with no dependencies
@@ -571,16 +571,16 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
     → Publishes `batch_dispatched` to `pipeline:{id}:status`
 
  6. Sherlock (per task) inspects codebase, produces execution plan
-    → May publish `consensus_request` → controller spawns Nelson → Nelson responds, exits
+    → May publish `consensus_request` → orchestrator spawns Nelson → Nelson responds, exits
     → Publishes `task_enriched` to `pipeline:{id}:enriched`
     → Container exits
 
- 7. Controller receives `task_enriched`
+ 7. Orchestrator receives `task_enriched`
     → Updates task status → READY
     → Spawns Richelieu to create worktree
     → Richelieu publishes `git_response` with worktree path and branch name, exits
 
- 8. Controller receives `git_response` (worktree ready)
+ 8. Orchestrator receives `git_response` (worktree ready)
     → Spawns Leonard container with TASK_ID, worktree path, branch name
 
  9. Leonard implements code following Sherlock's execution plan
@@ -589,16 +589,16 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
     → Publishes `implementation_complete` to `pipeline:{id}:reviews`
     → Container exits
 
-10. Controller receives `implementation_complete`
+10. Orchestrator receives `implementation_complete`
     → Updates task status → IN_REVIEW
     → Spawns Katherine container with TASK_ID
 
 11. Katherine reviews the diff using Nelson consensus
-    → Publishes `consensus_request` → controller spawns Nelson → Nelson responds, exits
+    → Publishes `consensus_request` → orchestrator spawns Nelson → Nelson responds, exits
     → Publishes `review_result` to `pipeline:{id}:reviews`
     → Container exits
 
-12. Controller receives `review_result`
+12. Orchestrator receives `review_result`
     ├── decision: "approved"
     │   → Publishes `git_request:merge_branch` to `pipeline:{id}:git_ops`
     │
@@ -611,32 +611,32 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
         → Updates task status → NEEDS_HUMAN
         → Publishes escalation to `human_input`
 
-13. Controller receives `git_request:merge_branch`
+13. Orchestrator receives `git_request:merge_branch`
     → Spawns Richelieu to merge task branch → feature branch
     → Richelieu publishes `git_response` with merge result, exits
 
-14. Controller receives `git_response` (merge success)
+14. Orchestrator receives `git_response` (merge success)
     → Updates task status → COMPLETED
     → Spawns Richelieu to remove worktree (`git_request:remove_worktree`)
 
-15. Controller evaluates dependency graph
+15. Orchestrator evaluates dependency graph
     → Calls `graph.get_ready_tasks()` with updated statuses
     ├── More tasks ready → Spawn Sherlocks (go to step 6)
     └── No tasks ready + all tasks complete → Continue to step 16
 
-16. Controller detects all tasks completed
+16. Orchestrator detects all tasks completed
     → Publishes `all_tasks_complete` to `pipeline:{id}:status`
 
-17. Controller transitions pipeline → COMPLETING
+17. Orchestrator transitions pipeline → COMPLETING
     → Publishes `git_request:open_pr` to `pipeline:{id}:git_ops`
 
-18. Controller spawns Richelieu to open PR
+18. Orchestrator spawns Richelieu to open PR
     → Richelieu opens PR from feature branch → target branch
     → Includes task summaries, review scores, cost summary in PR body
     → Publishes `git_response` with PR URL and number
     → Container exits
 
-19. Controller receives `git_response` (PR opened)
+19. Orchestrator receives `git_response` (PR opened)
     → Updates pipeline status → COMPLETED
     → Publishes `pipeline_completed` to `system:pipelines`
 
@@ -697,7 +697,7 @@ Same as Scenario 1: check retry count
 
 > Since all agents are now ephemeral, Nelson and Richelieu follow the exact same
 > retry/escalation logic as Julius, Sherlock, Leonard, and Katherine. Pending
-> requests queue up in Redis (durable) while the controller respawns.
+> requests queue up in Redis (durable) while the orchestrator respawns.
 
 ### Scenario 4: Merge conflict on branch_merged
 
@@ -705,7 +705,7 @@ Same as Scenario 1: check retry count
 Richelieu reports: git_response with success=false, conflicts=[...]
     │
     ▼
-Controller checks: is conflict auto-resolvable?
+Orchestrator checks: is conflict auto-resolvable?
     │
     ├── YES → Richelieu retries with auto-resolve
     │
@@ -720,7 +720,7 @@ Controller checks: is conflict auto-resolvable?
 Cost tracking (spec 07) fires: hard limit reached for task
     │
     ▼
-Controller receives budget_exceeded event on status stream
+Orchestrator receives budget_exceeded event on status stream
     │
     ▼
 Stop the container running that task
@@ -734,7 +734,7 @@ Other tasks continue if they have independent budgets
 Nelson reports: consensus_response with status="error", all providers failed
     │
     ▼
-Controller increments pipeline error counter
+Orchestrator increments pipeline error counter
     │
     ├── < threshold → Wait, affected agents will retry via their own backoff
     │
@@ -745,22 +745,22 @@ Controller increments pipeline error counter
 
 ---
 
-## Controller Health & Recovery
+## Orchestrator Health & Recovery
 
-> **Migrated from**: `docs/specs/01-deployment.md` — Controller Health & Recovery section
+> **Migrated from**: `docs/specs/01-deployment.md` — Orchestrator Health & Recovery section
 
 ### Heartbeat
 
-The controller writes a heartbeat to Redis every 10 seconds:
+The orchestrator writes a heartbeat to Redis every 10 seconds:
 
 ```python
 async def heartbeat_loop(redis: Redis) -> None:
     while True:
-        await redis.set("controller:heartbeat", str(time.time()), ex=30)
+        await redis.set("orchestrator:heartbeat", str(time.time()), ex=30)
         await asyncio.sleep(10)
 ```
 
-Docker Compose's health check verifies this key exists. If the controller hangs
+Docker Compose's health check verifies this key exists. If the orchestrator hangs
 (event loop frozen), the heartbeat expires after 30 seconds, Docker marks the
 container unhealthy, and `restart: unless-stopped` triggers a restart.
 
@@ -772,11 +772,11 @@ The architecture provides crash recovery through existing infrastructure:
    Pending Entries List (PEL). On restart, `XREADGROUP` automatically returns
    unacknowledged messages. No event is ever lost.
 
-2. **PostgreSQL state**: Pipeline and container state survives controller
-   restarts. The controller reads its last known state from PostgreSQL on startup.
+2. **PostgreSQL state**: Pipeline and container state survives orchestrator
+   restarts. The orchestrator reads its last known state from PostgreSQL on startup.
 
 3. **Docker labels**: All agent containers are labeled with `ai-team.*` labels.
-   The controller can discover running containers via Docker API queries.
+   The orchestrator can discover running containers via Docker API queries.
 
 ### Handler idempotency
 
@@ -793,7 +793,7 @@ idempotent**:
 
 ### Startup reconciliation
 
-On startup, the controller reconciles its state before entering the event loop:
+On startup, the orchestrator reconciles its state before entering the event loop:
 
 ```
 1. Connect to PostgreSQL, load pipeline and container state
@@ -822,15 +822,15 @@ mechanisms above. Graceful shutdown simply avoids wasting in-flight agent work.
 ## Configuration
 
 ```python
-# controller/src/controller/config.py
+# orchestrator/src/orchestrator/config.py
 
-class ControllerConfig(BaseSettings):
-    """Controller configuration, loaded from environment."""
+class OrchestratorConfig(BaseSettings):
+    """Orchestrator configuration, loaded from environment."""
 
     # Redis
     redis_url: str = "redis://redis:6379"
-    consumer_group: str = "controller"
-    consumer_name: str = "controller-1"
+    consumer_group: str = "orchestrator"
+    consumer_name: str = "orchestrator-1"
     stream_block_ms: int = 5000
 
     # Parallelism (per agent type)
@@ -866,9 +866,9 @@ class ControllerConfig(BaseSettings):
 
 ## Docker Compose Changes
 
-The controller is the sole orchestrator. Only infrastructure services are defined in
+The orchestrator is the sole orchestrator. Only infrastructure services are defined in
 `docker-compose.yml` (see spec 05). **All agents are ephemeral** — spawned by the
-controller via the Launcher.
+orchestrator via the Launcher.
 
 ### Always-running services (in `docker-compose.yml`)
 
@@ -878,9 +878,9 @@ controller via the Launcher.
 | `postgres`   | Durable state store for pipelines, containers, and tasks          |
 | `loki`       | Log aggregation backend for all services                          |
 | `grafana`    | Observability dashboards (connects to Loki)                       |
-| `controller` | Orchestrates the entire pipeline lifecycle                        |
+| `orchestrator` | Orchestrates the entire pipeline lifecycle                        |
 
-### Ephemeral containers (launched by controller via Launcher)
+### Ephemeral containers (launched by orchestrator via Launcher)
 
 | Agent        | Launched when                          | Parallelism              | Exits when                          |
 |--------------|----------------------------------------|--------------------------|-------------------------------------|
@@ -891,7 +891,7 @@ controller via the Launcher.
 | `nelson`     | `consensus_request` on stream          | Up to max_parallel       | Publishes `consensus_response`      |
 | `richelieu`  | `git_request` on stream                | 1 per branch (serialized)| Publishes `git_response`            |
 
-> **Docker socket access**: The controller connects to the Docker Socket Proxy
+> **Docker socket access**: The orchestrator connects to the Docker Socket Proxy
 > (see spec 05) to manage containers. In multi-machine deployments, the Docker
 > SDK is replaced by a Kubernetes or ECS launcher backend (see Launcher Protocol above).
 
@@ -916,7 +916,7 @@ controller via the Launcher.
 | Task with dependencies          | Dependent tasks launch only after blockers complete     |
 | Agent crash + retry             | Watchdog detects crash; container relaunched; resumes from checkpoint |
 | Max retries exceeded            | Task marked `needs_human`; dependents blocked; pipeline continues for independent tasks |
-| Merge conflict                  | Controller handles Richelieu's conflict report correctly |
+| Merge conflict                  | Orchestrator handles Richelieu's conflict report correctly |
 
 ### E2E Test
 
@@ -934,28 +934,28 @@ from spec 10):
 
 ## Build Order
 
-The controller is **Phase 1** — built immediately after the foundation (Phase 0) and
+The orchestrator is **Phase 1** — built immediately after the foundation (Phase 0) and
 before any agents. It needs core infrastructure (Redis, PostgreSQL, Pydantic models) but
 does not need any agent to exist yet. The router handlers reference message types that
 agents will eventually produce, but can be unit-tested with mock messages from day one.
 
-### Phase 1 — Controller (Complete)
+### Phase 1 — Orchestrator (Complete)
 
 | Step | Component                                         | Depends on                     |
 |------|---------------------------------------------------|--------------------------------|
-| 1.1  | `controller/config.py`                            | —                              |
-| 1.2  | `controller/state.py` + migrations                | PostgreSQL schema (spec 02)    |
-| 1.3  | `controller/launcher.py`                          | Docker SDK                     |
-| 1.4  | `controller/watchdog.py`                          | Heartbeat model (spec 08)      |
-| 1.5  | `controller/router.py` — full dispatch table      | 1.2–1.4                        |
-| 1.6  | `controller/main.py` — entrypoint                 | 1.1–1.5                        |
-| 1.7  | Docker Compose with controller service            | 1.6                            |
+| 1.1  | `orchestrator/config.py`                            | —                              |
+| 1.2  | `orchestrator/state.py` + migrations                | PostgreSQL schema (spec 02)    |
+| 1.3  | `orchestrator/launcher.py`                          | Docker SDK                     |
+| 1.4  | `orchestrator/watchdog.py`                          | Heartbeat model (spec 08)      |
+| 1.5  | `orchestrator/router.py` — full dispatch table      | 1.2–1.4                        |
+| 1.6  | `orchestrator/main.py` — entrypoint                 | 1.1–1.5                        |
+| 1.7  | Docker Compose with orchestrator service            | 1.6                            |
 | 1.8  | Unit tests (mock Docker SDK, mock Redis)           | 1.1–1.6                        |
 | 1.9  | Integration tests (real Redis, mock containers)    | 1.7                            |
 
-The controller is fully functional after Phase 1 — it can receive events and launch
+The orchestrator is fully functional after Phase 1 — it can receive events and launch
 containers. As each agent is built in Phases 2–7, it immediately plugs into the
-controller's existing routing table.
+orchestrator's existing routing table.
 
 ### Phase 8 — E2E Verification
 
@@ -969,8 +969,8 @@ controller's existing routing table.
 
 | Spec | Relationship                                                                |
 |------|-----------------------------------------------------------------------------|
-| 05   | Infrastructure spec defines Docker Compose layout, volumes, networking, image builds, resource limits. The controller runs on top of this infrastructure. |
-| 14   | API server provides the external interface; controller handles internal orchestration. |
-| 15   | TUI consumes pipeline events that the controller publishes. |
-| 04   | Controller consumes all message types from spec 04. Adds 6 new types. The routing table is the definitive "who reacts to what" reference. |
+| 05   | Infrastructure spec defines Docker Compose layout, volumes, networking, image builds, resource limits. The orchestrator runs on top of this infrastructure. |
+| 14   | API server provides the external interface; orchestrator handles internal orchestration. |
+| 15   | TUI consumes pipeline events that the orchestrator publishes. |
+| 04   | Orchestrator consumes all message types from spec 04. Adds 6 new types. The routing table is the definitive "who reacts to what" reference. |
 | 01   | Adds `PipelineStatus` enum, `PipelineCreatedPayload` and 5 other payload models to `models/messages.py`. Adds `pipelines` and `active_containers` tables to the PostgreSQL schema. |

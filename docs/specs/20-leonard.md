@@ -32,15 +32,15 @@ by Richelieu.
 
 ## Lifecycle
 
-- **Spawned when**: A task is enriched (Sherlock completed) and the worktree is ready (Richelieu completed). The controller (spec 13-controller) spawns Leonard with the worktree path and branch name.
+- **Spawned when**: A task is enriched (Sherlock completed) and the worktree is ready (Richelieu completed). The orchestrator (spec 13-orchestrator) spawns Leonard with the worktree path and branch name.
 - **Exits when**: Publishes `implementation_complete` to `pipeline:{id}:reviews`.
 - **Parallelism**: Up to `max_parallel_leonards` (default: 3) running simultaneously. Each Leonard works in its own worktree.
 
 ### Rework Loop
 
 When Katherine requests changes:
-1. The controller receives `review_result:changes_requested`.
-2. The controller respawns Leonard with Katherine's feedback attached.
+1. The orchestrator receives `review_result:changes_requested`.
+2. The orchestrator respawns Leonard with Katherine's feedback attached.
 3. Leonard reads the feedback, modifies the implementation, and re-publishes `implementation_complete`.
 4. This loop continues until Katherine approves or the retry limit is reached.
 
@@ -60,7 +60,7 @@ When learning mode is active (see spec 03):
 
 ### Input
 
-- **Message type**: Spawned by controller with task context
+- **Message type**: Spawned by orchestrator with task context
 - **Environment variables**: `PIPELINE_ID`, `TASK_ID`, `WORKTREE_PATH`, `BRANCH_NAME`
 - **Data available**:
   - Sherlock's mini execution plan (from `task_enriched` in Redis/PostgreSQL).
@@ -117,7 +117,7 @@ When learning mode is active (see spec 03):
 - **Katherine (spec 21)**: Katherine reviews Leonard's implementation. If changes are requested, Leonard receives the feedback and iterates (rework loop).
 - **Richelieu (spec 18)**: Richelieu provisions the worktree and branch before Leonard starts. Leonard commits to the task branch; Richelieu handles push, merge, and PR operations.
 - **Nelson (spec 16)**: Leonard does not typically call Nelson directly. However, in rare cases where the implementation approach is unclear despite Sherlock's plan, Leonard may request consensus.
-- **Controller (spec 13-controller)**: The controller spawns Leonard, monitors its health, and handles retries on failure.
+- **Orchestrator (spec 13-orchestrator)**: The orchestrator spawns Leonard, monitors its health, and handles retries on failure.
 
 ---
 
@@ -178,8 +178,8 @@ Leonard's access is restricted to prevent unintended side effects:
 - **Tests fail after N attempts**: If tests fail after the configured retry limit (default: 3 attempts), Leonard escalates to human with a summary of what went wrong, the failing tests, and the current state of the implementation.
 - **Lint/format failures**: If linting or formatting cannot be fixed after retries, include the issues in the escalation.
 - **Acceptance criteria not met**: If criteria cannot be satisfied, escalate with a description of which criteria failed and why.
-- **Container crash**: The controller respawns Leonard. Since Leonard's work is committed to git incrementally (where possible), a respawn can resume from the last commit.
-- **Timeout**: If Leonard exceeds its container deadline (default: 30 minutes), the controller kills the container and escalates.
+- **Container crash**: The orchestrator respawns Leonard. Since Leonard's work is committed to git incrementally (where possible), a respawn can resume from the last commit.
+- **Timeout**: If Leonard exceeds its container deadline (default: 30 minutes), the orchestrator kills the container and escalates.
 
 ---
 

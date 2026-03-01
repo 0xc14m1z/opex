@@ -29,7 +29,7 @@ concrete implementation work.
 
 ## Lifecycle
 
-- **Spawned when**: A task becomes `ready` in the dependency graph (all dependencies completed). The controller (spec 13-controller) spawns one Sherlock per task.
+- **Spawned when**: A task becomes `ready` in the dependency graph (all dependencies completed). The orchestrator (spec 13-orchestrator) spawns one Sherlock per task.
 - **Exits when**: Publishes `task_enriched` to `pipeline:{id}:enriched`.
 - **Parallelism**: Up to `max_parallel_sherlocks` (default: 5) running simultaneously.
 
@@ -99,7 +99,7 @@ concrete implementation work.
 - **Julius (spec 17)**: Sherlock receives task definitions produced by Julius. Julius provides the "what"; Sherlock provides the "how".
 - **Nelson (spec 16)**: Sherlock uses Nelson when there are ambiguous implementation approaches. Nelson evaluates and resolves the ambiguity via consensus.
 - **Leonard (spec 20-leonard)**: Sherlock's execution plan is the primary input for Leonard. The plan must be detailed enough for Leonard to implement without further codebase exploration.
-- **Controller (spec 13-controller)**: The controller spawns Sherlock when a task is ready and consumes the `task_enriched` output to proceed with Richelieu (worktree creation) and then Leonard.
+- **Orchestrator (spec 13-orchestrator)**: The orchestrator spawns Sherlock when a task is ready and consumes the `task_enriched` output to proceed with Richelieu (worktree creation) and then Leonard.
 
 ---
 
@@ -156,7 +156,7 @@ Expected tools:
   gap and can escalate.
 - **Nelson failure**: If Nelson is unavailable for ambiguity resolution, Sherlock
   picks the most conservative approach and documents the alternatives for Leonard.
-- **Container crash**: The controller respawns Sherlock with the same task. Since
+- **Container crash**: The orchestrator respawns Sherlock with the same task. Since
   Sherlock is stateless (reads from repo and Redis), a respawn starts enrichment
   from scratch.
 - **Large codebase**: If the codebase is very large, Sherlock focuses on the files

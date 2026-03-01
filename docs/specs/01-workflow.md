@@ -10,7 +10,7 @@ This spec defines the complete pipeline lifecycle from plan submission to merged
 It covers the branching model, the worktree layout, the review flow, and the full
 20-step event walkthrough that drives a pipeline from start to finish.
 
-For the controller that orchestrates these events, see spec 13.
+For the orchestrator that orchestrates these events, see spec 13.
 For the communication protocol (Redis Streams), see spec 04.
 For git operations (Richelieu), see spec 18.
 
@@ -129,7 +129,7 @@ the other to become outdated or have conflicts.
 Task-1 PR merges into feature/add-auth
     │
     ▼
-Controller detects task-2 PR is outdated
+Orchestrator detects task-2 PR is outdated
     │
     ▼
 Spawns Richelieu to rebase task-2 onto feature/add-auth
@@ -182,15 +182,15 @@ Every task PR goes through this review flow on GitHub:
 
 ## Dependency Dispatch
 
-The controller evaluates the dependency graph after every task completion to
+The orchestrator evaluates the dependency graph after every task completion to
 determine which tasks can be launched next. This is the core scheduling logic.
 
 ### How it works
 
 1. When `branch_merged` event arrives (a task's PR was merged into the feature
-   branch), the controller marks that task as `COMPLETED`.
+   branch), the orchestrator marks that task as `COMPLETED`.
 
-2. The controller calls `DependencyGraph.get_ready_tasks()` which returns tasks
+2. The orchestrator calls `DependencyGraph.get_ready_tasks()` which returns tasks
    whose dependencies are all completed and whose status is still `PENDING`:
 
    ```python
@@ -204,21 +204,21 @@ determine which tasks can be launched next. This is the core scheduling logic.
        ]
    ```
 
-3. For each newly ready task, the controller spawns a Sherlock container to
+3. For each newly ready task, the orchestrator spawns a Sherlock container to
    enrich it (beginning the Sherlock → Leonard → Katherine pipeline for that
    task).
 
-4. The controller publishes a `batch_dispatched` event tracking which tasks
+4. The orchestrator publishes a `batch_dispatched` event tracking which tasks
    were launched in this batch.
 
 5. If `get_ready_tasks()` returns empty AND all tasks are completed, the
-   controller transitions the pipeline to `COMPLETING` and spawns Richelieu
+   orchestrator transitions the pipeline to `COMPLETING` and spawns Richelieu
    to open the feature PR.
 
 ### Parallelism limits
 
-The controller respects per-agent parallelism limits (see spec 13 for
-`ControllerConfig`):
+The orchestrator respects per-agent parallelism limits (see spec 13 for
+`OrchestratorConfig`):
 
 - `max_parallel_sherlocks: 5`
 - `max_parallel_leonards: 3`
@@ -226,7 +226,7 @@ The controller respects per-agent parallelism limits (see spec 13 for
 - `max_parallel_nelsons: 5`
 - `max_parallel_richelieus: 3` (serialized per-branch, parallel across branches)
 
-If more tasks are ready than the parallelism limit allows, the controller
+If more tasks are ready than the parallelism limit allows, the orchestrator
 queues them and launches as slots become available.
 
 ---
@@ -239,24 +239,24 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
  1. Human submits plan via TUI/CLI
     → TUI publishes `pipeline_created` to `system:pipelines`
 
- 2. Controller receives `pipeline_created`
+ 2. Orchestrator receives `pipeline_created`
     → Creates pipeline record in PostgreSQL (status: CREATED)
     → Spawns Richelieu to create feature branch
     → Richelieu publishes `git_response` with branch name, exits
 
- 3. Controller receives `git_response` (feature branch ready)
+ 3. Orchestrator receives `git_response` (feature branch ready)
     → Updates pipeline status → DECOMPOSING
     → Spawns Julius container (PIPELINE_ID env var)
 
  4. Julius analyzes codebase, decomposes plan into tasks
     → Publishes `consensus_request` to `pipeline:{id}:consensus`
-    → Controller spawns Nelson for validation
+    → Orchestrator spawns Nelson for validation
     → Nelson publishes `consensus_response`, exits
     → Julius publishes all `task_created` messages to `pipeline:{id}:tasks`
     → Julius publishes `decomposition_complete` to `pipeline:{id}:tasks`
     → Julius container exits
 
- 5. Controller receives `decomposition_complete`
+ 5. Orchestrator receives `decomposition_complete`
     → Stores DependencyGraph in PostgreSQL
     → Updates pipeline status → IN_PROGRESS
     → Calls `graph.get_ready_tasks()` to find tasks with no dependencies
@@ -264,16 +264,16 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
     → Publishes `batch_dispatched` to `pipeline:{id}:status`
 
  6. Sherlock (per task) inspects codebase, produces execution plan
-    → May publish `consensus_request` → controller spawns Nelson → Nelson responds, exits
+    → May publish `consensus_request` → orchestrator spawns Nelson → Nelson responds, exits
     → Publishes `task_enriched` to `pipeline:{id}:enriched`
     → Container exits
 
- 7. Controller receives `task_enriched`
+ 7. Orchestrator receives `task_enriched`
     → Updates task status → READY
     → Spawns Richelieu to create worktree
     → Richelieu publishes `git_response` with worktree path and branch name, exits
 
- 8. Controller receives `git_response` (worktree ready)
+ 8. Orchestrator receives `git_response` (worktree ready)
     → Spawns Leonard container with TASK_ID, worktree path, branch name
 
  9. Leonard implements code following Sherlock's execution plan
@@ -282,16 +282,16 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
     → Publishes `implementation_complete` to `pipeline:{id}:reviews`
     → Container exits
 
-10. Controller receives `implementation_complete`
+10. Orchestrator receives `implementation_complete`
     → Updates task status → IN_REVIEW
     → Spawns Katherine container with TASK_ID
 
 11. Katherine reviews the diff using Nelson consensus
-    → Publishes `consensus_request` → controller spawns Nelson → Nelson responds, exits
+    → Publishes `consensus_request` → orchestrator spawns Nelson → Nelson responds, exits
     → Publishes `review_result` to `pipeline:{id}:reviews`
     → Container exits
 
-12. Controller receives `review_result`
+12. Orchestrator receives `review_result`
     ├── decision: "approved"
     │   → Publishes `git_request:merge_branch` to `pipeline:{id}:git_ops`
     │
@@ -304,32 +304,32 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
         → Updates task status → NEEDS_HUMAN
         → Publishes escalation to `human_input`
 
-13. Controller receives `git_request:merge_branch`
+13. Orchestrator receives `git_request:merge_branch`
     → Spawns Richelieu to merge task branch → feature branch
     → Richelieu publishes `git_response` with merge result, exits
 
-14. Controller receives `git_response` (merge success)
+14. Orchestrator receives `git_response` (merge success)
     → Updates task status → COMPLETED
     → Spawns Richelieu to remove worktree (`git_request:remove_worktree`)
 
-15. Controller evaluates dependency graph
+15. Orchestrator evaluates dependency graph
     → Calls `graph.get_ready_tasks()` with updated statuses
     ├── More tasks ready → Spawn Sherlocks (go to step 6)
     └── No tasks ready + all tasks complete → Continue to step 16
 
-16. Controller detects all tasks completed
+16. Orchestrator detects all tasks completed
     → Publishes `all_tasks_complete` to `pipeline:{id}:status`
 
-17. Controller transitions pipeline → COMPLETING
+17. Orchestrator transitions pipeline → COMPLETING
     → Publishes `git_request:open_pr` to `pipeline:{id}:git_ops`
 
-18. Controller spawns Richelieu to open PR
+18. Orchestrator spawns Richelieu to open PR
     → Richelieu opens PR from feature branch → target branch
     → Includes task summaries, review scores, cost summary in PR body
     → Publishes `git_response` with PR URL and number
     → Container exits
 
-19. Controller receives `git_response` (PR opened)
+19. Orchestrator receives `git_response` (PR opened)
     → Updates pipeline status → COMPLETED
     → Publishes `pipeline_completed` to `system:pipelines`
 

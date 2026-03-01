@@ -8,9 +8,9 @@ Agents crash. LLM APIs go down. Tests flake. The system is designed to handle al
 these gracefully: checkpoint progress, restart from where it left off, retry up to 3
 times, alert the human, and escalate on total failure.
 
-> **Note**: The controller (spec 13) implements handler idempotency and startup
+> **Note**: The orchestrator (spec 13) implements handler idempotency and startup
 > reconciliation to ensure that events are never lost or double-processed after a
-> crash. All event handlers in the controller must be idempotent — see spec 13 for
+> crash. All event handlers in the orchestrator must be idempotent — see spec 13 for
 > the idempotency rules table and startup reconciliation sequence.
 
 ---
@@ -233,7 +233,7 @@ class Heartbeat(BaseModel):
 
 ### Dead Agent Detection
 
-The controller's watchdog (see spec 13) monitors heartbeats for all ephemeral agent
+The orchestrator's watchdog (see spec 13) monitors heartbeats for all ephemeral agent
 containers (Nelson, Julius, Sherlock, Leonard, Katherine, Richelieu):
 
 - If no heartbeat for 90 seconds → agent container is presumed dead.
@@ -257,7 +257,7 @@ If one task in a pipeline fails but others succeed:
 
 If the entire pipeline is unrecoverable:
 
-1. Controller stops spawning new agent containers.
+1. Orchestrator stops spawning new agent containers.
 2. All branches and worktrees are preserved (no cleanup).
 3. A summary is posted to the TUI and GitHub issue.
 4. Human can: fix the issue and re-trigger, or abandon the pipeline.
@@ -266,8 +266,8 @@ If the entire pipeline is unrecoverable:
 
 ### After Successful Pipeline
 
-1. Controller spawns Richelieu to remove all worktrees.
-2. Controller spawns Richelieu to delete merged task branches.
+1. Orchestrator spawns Richelieu to remove all worktrees.
+2. Orchestrator spawns Richelieu to delete merged task branches.
 3. Expired checkpoints are purged from PostgreSQL.
 4. Cost records and logs are retained (never auto-deleted).
 
@@ -288,18 +288,18 @@ All agent operations should be idempotent where possible:
 
 This prevents double-execution issues when resuming from checkpoints.
 
-> **Note**: The controller itself also enforces idempotency in its event handlers.
+> **Note**: The orchestrator itself also enforces idempotency in its event handlers.
 > See spec 13 for the full handler idempotency table (e.g., `launch_agent` checks
 > if agent already running, `open_pr` checks if PR already exists, etc.) and the
 > startup reconciliation sequence that reconciles Docker container state with
-> PostgreSQL state after a controller crash.
+> PostgreSQL state after a orchestrator crash.
 
 ---
 
 ## Cross-References
 
 - **Spec 05** (Infrastructure): Resource limits prevent runaway containers.
-- **Spec 06** (Controller): Watchdog monitors heartbeats, handler idempotency, startup reconciliation, retry orchestration.
+- **Spec 06** (Orchestrator): Watchdog monitors heartbeats, handler idempotency, startup reconciliation, retry orchestration.
 - **Spec 08** (TUI): Displays error banners, escalation alerts, blocked task indicators.
 - **Spec 15** (Observability): Error events, checkpoint events, retry events in log stream.
 - **Spec 16** (Cost Tracking): Budget exceeded is a fatal error category.

@@ -37,7 +37,7 @@ agent when a high-confidence decision is needed.
 
 ## Lifecycle
 
-- **Spawned when**: A `consensus_request` message appears on a `pipeline:{id}:consensus` stream (see spec 13-controller).
+- **Spawned when**: A `consensus_request` message appears on a `pipeline:{id}:consensus` stream (see spec 13-orchestrator).
 - **Exits when**: Publishes a `consensus_response` to `pipeline:{id}:consensus_resp`.
 - **Parallelism**: Up to `max_parallel_nelsons` (default: 5) running simultaneously. Each Nelson handles one consensus request.
 
@@ -453,9 +453,9 @@ Optimization strategies:
   than 2 are available, return `status="error"`.
 - **All providers fail**: Return `consensus_response` with `status="error"`. The
   requesting agent handles the error (typically escalates to human).
-- **Container crash**: The controller's watchdog detects the crash and respawns
+- **Container crash**: The orchestrator's watchdog detects the crash and respawns
   Nelson with the same `consensus_request`. Pending requests queue in Redis (durable).
-  Up to 3 retries before escalating (see spec 13-controller).
+  Up to 3 retries before escalating (see spec 13-orchestrator).
 - **Timeout**: Each provider call has a configurable timeout. If a provider times out,
   it is treated as a failure for that round.
 

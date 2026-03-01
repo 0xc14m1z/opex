@@ -21,13 +21,13 @@ Leonard can implement it and a single Katherine can review it in one pass.
 - Build a **dependency graph** identifying which tasks can run in parallel vs. which must be sequential.
 - Estimate complexity per task.
 - Use Nelson (spec 16) to validate the decomposition quality.
-- Publish the task list and dependency graph for the controller (spec 13-controller) to dispatch.
+- Publish the task list and dependency graph for the orchestrator (spec 13-orchestrator) to dispatch.
 
 ---
 
 ## Lifecycle
 
-- **Spawned when**: `pipeline_created` event is received by the controller (after Richelieu creates the feature branch).
+- **Spawned when**: `pipeline_created` event is received by the orchestrator (after Richelieu creates the feature branch).
 - **Exits when**: Publishes `decomposition_complete` to `pipeline:{id}:tasks`.
 - **Parallelism**: 1 per pipeline. Only one Julius runs per pipeline.
 
@@ -37,7 +37,7 @@ Leonard can implement it and a single Katherine can review it in one pass.
 
 ### Input
 
-- **Message type**: `pipeline_created` (routed by the controller)
+- **Message type**: `pipeline_created` (routed by the orchestrator)
 - **Redis stream**: `system:pipelines`
 - **Environment variables**: `PIPELINE_ID`, `REPO_URL`, `TARGET_BRANCH`
 - **Data available**:
@@ -97,7 +97,7 @@ the `decomposition_complete` message.
 ## Interaction with Other Agents
 
 - **Nelson (spec 16)**: Julius uses Nelson to validate the decomposition before publishing. If Nelson identifies issues, Julius revises the decomposition.
-- **Controller (spec 13-controller)**: The controller spawns Julius and consumes its `decomposition_complete` output to begin dispatching tasks.
+- **Orchestrator (spec 13-orchestrator)**: The orchestrator spawns Julius and consumes its `decomposition_complete` output to begin dispatching tasks.
 - **Sherlock (spec 19)**: Each task produced by Julius becomes input for a Sherlock instance that enriches it with codebase-specific details.
 - **Richelieu (spec 18)**: Richelieu creates the feature branch before Julius runs. Julius does not interact with Richelieu directly.
 
@@ -143,7 +143,7 @@ Expected tools:
 
 - **LLM failure during decomposition**: Retry up to 3 times. If Nelson validation
   fails repeatedly, escalate to human with the best decomposition so far.
-- **Container crash**: The controller's watchdog detects the crash and may respawn
+- **Container crash**: The orchestrator's watchdog detects the crash and may respawn
   Julius. Since Julius is stateless (reads plan from Redis/PostgreSQL), a respawn
   starts the decomposition from scratch.
 - **Invalid plan**: If the plan is too vague or ambiguous to decompose, Julius

@@ -294,7 +294,7 @@ make disconnect REPO=https://github.com/org/my-app
 ## Cross-References
 
 - **Spec 05** (Infrastructure): Docker Compose volumes, filesystem access rules, `make connect` target.
-- **Spec 06** (Controller): Pipeline creation triggers Richelieu for `git fetch`.
+- **Spec 06** (Orchestrator): Pipeline creation triggers Richelieu for `git fetch`.
 - **Spec 16** (Cost Tracking): `.ai-team.yaml` `budget:` section for per-project limits.
 - **Spec 18** (Security): `.ai-team.yaml` `secrets:` section, GitHub App and PAT credential management.
 - **Spec 19** (Testing): `.ai-team.yaml` config parsing tests, test repo fixture.

@@ -462,14 +462,14 @@ class Checkpoint(BaseModel):
     expires_at: datetime
 ```
 
-## Controller Models
+## Orchestrator Models
 
-These payload models are used by the pipeline controller (spec 13) and are the
-canonical definitions for controller lifecycle events. All use the standard
+These payload models are used by the pipeline orchestrator (spec 13) and are the
+canonical definitions for orchestrator lifecycle events. All use the standard
 `MessageEnvelope` from spec 04.
 
 ```python
-# models/messages.py (controller payloads)
+# models/messages.py (orchestrator payloads)
 
 class PipelineCreatedPayload(BaseModel):
     """Published by the TUI/CLI when a human starts a new pipeline."""
@@ -489,7 +489,7 @@ class DecompositionCompletePayload(BaseModel):
 
 
 class BatchDispatchedPayload(BaseModel):
-    """Published by the controller when it launches a batch of Sherlocks."""
+    """Published by the orchestrator when it launches a batch of Sherlocks."""
     pipeline_id: str
     task_ids: list[str]                      # Tasks being dispatched in this batch
     batch_number: int                        # 1-indexed
@@ -498,7 +498,7 @@ class BatchDispatchedPayload(BaseModel):
 
 
 class AllTasksCompletePayload(BaseModel):
-    """Published by the controller when every task in the pipeline reaches completed."""
+    """Published by the orchestrator when every task in the pipeline reaches completed."""
     pipeline_id: str
     task_count: int
     total_cost: float
@@ -506,7 +506,7 @@ class AllTasksCompletePayload(BaseModel):
 
 
 class PipelineCompletedPayload(BaseModel):
-    """Published by the controller after the PR is opened successfully."""
+    """Published by the orchestrator after the PR is opened successfully."""
     pipeline_id: str
     pr_url: str
     pr_number: int
@@ -517,7 +517,7 @@ class PipelineCompletedPayload(BaseModel):
 
 
 class PipelineFailedPayload(BaseModel):
-    """Published by the controller when the pipeline cannot continue."""
+    """Published by the orchestrator when the pipeline cannot continue."""
     pipeline_id: str
     reason: str
     failed_task_id: str | None               # None if pipeline-level failure
@@ -646,7 +646,7 @@ CREATE TABLE repo_connections (
     last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Active containers (managed by the controller)
+-- Active containers (managed by the orchestrator)
 CREATE TABLE active_containers (
     container_id TEXT PRIMARY KEY,
     agent TEXT NOT NULL,                      -- AgentName

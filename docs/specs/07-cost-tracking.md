@@ -239,7 +239,7 @@ Once enough data is collected, the system can suggest optimizations:
 ## Cross-References
 
 - **Spec 05** (Infrastructure): Docker Compose config, `.env` for `DAILY_BUDGET_HARD`.
-- **Spec 06** (Controller): Budget enforcement halts pipeline if daily limit exceeded.
+- **Spec 06** (Orchestrator): Budget enforcement halts pipeline if daily limit exceeded.
 - **Spec 08** (TUI): Real-time cost display, budget alerts.
 - **Spec 15** (Observability): `llm_call_completed`, `budget_warning`, `budget_exceeded` events.
 - **Spec 17** (Error Recovery): Budget exceeded is a fatal error that escalates to human.

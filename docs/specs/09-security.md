@@ -125,7 +125,7 @@ services:
 - No `--privileged` flag.
 - No host network mode.
 - No host PID namespace.
-- No Docker socket mount (except for the controller via the Docker Socket Proxy —
+- No Docker socket mount (except for the orchestrator via the Docker Socket Proxy —
   see "Docker Socket Security" below).
 
 ### Network Isolation
@@ -239,7 +239,7 @@ secrets:
 
 ### Implementation
 
-The Launcher (see spec 13 for controller implementation) filters secrets at
+The Launcher (see spec 13 for orchestrator implementation) filters secrets at
 container creation time:
 
 ```python
@@ -270,14 +270,14 @@ def filter_env(self, agent: AgentName, full_env: dict) -> dict:
 
 > **Migrated from**: `docs/specs/01-deployment.md` (Docker Socket Security section)
 
-The controller needs Docker API access to spawn agent containers. Instead of
+The orchestrator needs Docker API access to spawn agent containers. Instead of
 mounting the raw Docker socket (which grants full host-level Docker access), a
-**socket proxy** restricts the controller to only the operations it needs.
+**socket proxy** restricts the orchestrator to only the operations it needs.
 
 ### Architecture
 
 ```
-Controller  ──TCP:2375──→  Docker Socket Proxy  ──unix──→  /var/run/docker.sock
+Orchestrator  ──TCP:2375──→  Docker Socket Proxy  ──unix──→  /var/run/docker.sock
                            (tecnativa/docker-socket-proxy)
                            Only allows:
                            - Container create/start/stop/inspect/wait/remove
@@ -311,9 +311,9 @@ docker-proxy:
 
 | Risk                                 | Mitigation                                    |
 |--------------------------------------|-----------------------------------------------|
-| Compromised controller spawns rogue container | Socket proxy blocks unauthorized operations |
-| Controller accesses host filesystem  | Socket proxy blocks volume creation           |
-| Controller modifies network topology | Socket proxy blocks network operations        |
+| Compromised orchestrator spawns rogue container | Socket proxy blocks unauthorized operations |
+| Orchestrator accesses host filesystem  | Socket proxy blocks volume creation           |
+| Orchestrator modifies network topology | Socket proxy blocks network operations        |
 | Proxy itself is compromised          | Proxy runs with minimal attack surface, no exposed ports |
 
 ---
@@ -379,7 +379,7 @@ suggestions for monitoring security-relevant activity.
 ## Cross-References
 
 - **Spec 05** (Infrastructure): Docker Compose config, Docker Socket Proxy service, container resource limits.
-- **Spec 06** (Controller): Launcher implements secret filtering, Loki log config for ephemeral agents.
+- **Spec 06** (Orchestrator): Launcher implements secret filtering, Loki log config for ephemeral agents.
 - **Spec 15** (Observability): Audit logging table, log redaction, security event queries.
 - **Spec 16** (Cost Tracking): Budget limits as financial damage mitigation.
 - **Spec 17** (Error Recovery): Container crash handling, retry limits.

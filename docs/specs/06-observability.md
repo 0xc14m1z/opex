@@ -217,7 +217,7 @@ The Loki logging driver replaces Docker's default `json-file` driver. When
 configured, the Docker daemon sends container stdout/stderr directly to the Loki
 HTTP push endpoint.
 
-**For Docker Compose services** (Redis, PostgreSQL, controller, API server), the
+**For Docker Compose services** (Redis, PostgreSQL, orchestrator, API server), the
 logging driver is configured via the YAML anchor in `docker-compose.yml` (see
 spec 05 for the canonical Docker Compose config):
 
@@ -231,7 +231,7 @@ x-logging: &default-logging
     labels: "service={{.Name}}"
 ```
 
-**For ephemeral agent containers**, the controller's Launcher explicitly configures
+**For ephemeral agent containers**, the orchestrator's Launcher explicitly configures
 the Loki logging driver on each `container.run()` call, since ephemeral containers
 do not inherit Docker Compose's logging configuration (see spec 05 for Launcher
 implementation):
@@ -420,7 +420,7 @@ joining audit events with pipeline or task records.
 ## Cross-References
 
 - **Spec 05** (Infrastructure): Docker Compose config with Loki logging driver, ephemeral agent Loki config in Launcher.
-- **Spec 06** (Controller): Watchdog monitors agent heartbeats; controller logs its own lifecycle events.
+- **Spec 06** (Orchestrator): Watchdog monitors agent heartbeats; orchestrator logs its own lifecycle events.
 - **Spec 08** (TUI): Subscribes to Redis `logs:*` streams for real-time log display.
 - **Spec 16** (Cost Tracking): `llm_call_completed` events carry cost data; budget events.
 - **Spec 17** (Error Recovery): `agent_error`, `task_failed`, checkpoint and retry events.

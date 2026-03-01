@@ -26,7 +26,7 @@ loop where Claude, GPT, and Gemini cross-review each other until they converge.
 | **Leonard** | Implementer | Takes an execution plan and implements the code changes, runs tests/linting, validates against acceptance criteria. Can run in parallel. See [spec 20](20-leonard.md). |
 | **Katherine** | Code Reviewer | Reviews implementations via Nelson consensus, decides whether human review is needed using adaptive scoring. See [spec 21](21-katherine.md). |
 | **Richelieu** | Git & Workspace Manager | Manages all git operations: feature branches, worktrees, merging, conflict resolution, PR creation. See [spec 18](18-richelieu.md). |
-| **Orchestrator** | Pipeline Orchestrator (no LLM) | Deterministic event router that drives the entire pipeline lifecycle. Spawns and monitors all agent containers. See [spec 13](13-controller.md). |
+| **Orchestrator** | Pipeline Orchestrator (no LLM) | Deterministic event router that drives the entire pipeline lifecycle. Spawns and monitors all agent containers. See [spec 13](13-orchestrator.md). |
 
 ---
 
@@ -117,7 +117,7 @@ reference for its domain.
 | 10 | [`10-testing.md`](10-testing.md) | Record/replay (VCR), unit/integration/E2E pyramid, CI stages. |
 | 11 | [`11-dev-standards.md`](11-dev-standards.md) | ruff + mypy strict + 90% coverage, coding conventions, CI pipeline. |
 | 12 | [`12-repo-connection.md`](12-repo-connection.md) | GitHub App + PAT auth, cloning, webhooks, `.ai-team.yaml` full spec. |
-| 13 | [`13-controller.md`](13-controller.md) | Pipeline orchestrator: event router, container launcher, watchdog, dependency dispatch. |
+| 13 | [`13-orchestrator.md`](13-orchestrator.md) | Pipeline orchestrator: event router, container launcher, watchdog, dependency dispatch. |
 | 14 | [`14-api-server.md`](14-api-server.md) | REST + SSE API for TUI client, authentication, endpoints. |
 | 15 | [`15-tui.md`](15-tui.md) | TUI (Textual) with pipeline, task, log, consensus, and cost views. |
 | 16 | [`16-nelson.md`](16-nelson.md) | Nelson deep dive: consensus algorithm, weight learning, prompt templates, cost optimization. |

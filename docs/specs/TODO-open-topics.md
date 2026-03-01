@@ -10,7 +10,7 @@ version and iterate on prompts? These need to be defined in specs 16-21 (one per
 
 ### ~~2. Pipeline Orchestrator~~ — RESOLVED
 
-Resolved in [13-controller.md](13-controller.md). A deterministic controller service
+Resolved in [13-orchestrator.md](13-orchestrator.md). A deterministic orchestrator service
 (no LLM) watches Redis Streams and launches ephemeral agent containers via Docker SDK.
 All agents (including Nelson and Richelieu) are ephemeral one-shot containers.
 
@@ -27,7 +27,7 @@ Each target repo specifies `default_model`, `consensus.models`, and optional per
 All calls go through OpenRouter, which has its own rate limits. Multiple Leonards and
 Nelson's parallel consensus calls can hit these limits. How do we manage this across the
 whole system? Options: LiteLLM's built-in rate limit handling, a central rate limiter in
-the controller, or per-agent backoff.
+the orchestrator, or per-agent backoff.
 
 > **Note**: The API server (spec 14) could also handle rate limiting for inbound TUI
 > requests, which is a separate concern from LLM API rate limits.
@@ -67,7 +67,7 @@ logs automatically. Grafana provides LogQL querying and dashboards. See specs 05
 
 ### ~~10. Health Checks~~ — RESOLVED
 Redis heartbeats only (every 30s to `status` stream). No HTTP health endpoints in agents.
-Controller watchdog monitors heartbeats. See specs 08, 13.
+Orchestrator watchdog monitors heartbeats. See specs 08, 13.
 
 ### ~~11. Testing Infrastructure~~ — RESOLVED
 testcontainers for real Redis and PostgreSQL per test session. VCR cassettes for LLM call
@@ -86,7 +86,7 @@ Medium-thickness typed wrapper: auto MessageEnvelope serialization, async genera
 consuming, idempotent consumer group creation, built-in dead letter handling. See spec 04.
 
 ### ~~15. Nelson Concurrency~~ — RESOLVED
-Nelson is ephemeral — the controller spawns a new Nelson container for each
+Nelson is ephemeral — the orchestrator spawns a new Nelson container for each
 `consensus_request`. Multiple Nelsons run in parallel (up to `max_parallel_nelsons`).
 Requests queue in Redis if the limit is reached. See specs 05, 13.
 
@@ -96,7 +96,7 @@ env vars it needs. Target repo can extend (not reduce) allowlists via `.ai-team.
 See spec 09.
 
 ### ~~17. Docker Socket Security~~ — RESOLVED
-Socket proxy (tecnativa/docker-socket-proxy) restricts controller to container
+Socket proxy (tecnativa/docker-socket-proxy) restricts orchestrator to container
 operations only. Blocks image, network, volume, and swarm operations. See spec 09.
 
 ### ~~18. Network Egress~~ — RESOLVED

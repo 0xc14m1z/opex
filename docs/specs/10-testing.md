@@ -293,7 +293,7 @@ class TestCheckpoint:
 | Cost tracking accumulation | LLM calls (VCR) + PostgreSQL + budget checking |
 | Git operations | Richelieu + test git repo |
 | Config loading | `.ai-team.yaml` parsing from a test repo |
-| Controller launches agents | Controller + Docker SDK (Docker-in-Docker) |
+| Orchestrator launches agents | Orchestrator + Docker SDK (Docker-in-Docker) |
 
 ### Integration Test Infrastructure
 
@@ -328,7 +328,7 @@ def infra_stack():
     )
 ```
 
-For controller integration tests (where the controller uses the Docker SDK to launch
+For orchestrator integration tests (where the orchestrator uses the Docker SDK to launch
 agent containers), Docker-in-Docker (DinD) is used so the test environment has access
 to a Docker daemon.
 

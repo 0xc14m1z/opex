@@ -34,10 +34,10 @@ identify gaps, clarify details, and resolve open questions.
 | Spec | Status | Notes |
 |------|--------|-------|
 | 00 Overview | **Reviewed** | Done. Mermaid diagrams, final spec index. |
-| 01 Workflow | **Next up** | Review the pipeline flow, branching model, PR flow. Verify consistency with controller (13) and Richelieu (18). |
+| 01 Workflow | **Next up** | Review the pipeline flow, branching model, PR flow. Verify consistency with orchestrator (13) and Richelieu (18). |
 | 02 Data Models | Needs review | Verify all tables match decisions. Add any missing schemas from workflow/learning discussions. |
 | 03 Learning & Principles | Needs review | Rich content from our discussion. Verify Extract→Replay→Verify loop is fully specified. |
-| 04 Communication | Needs review | Migrated from old spec 10. Check message types match controller routing table. |
+| 04 Communication | Needs review | Migrated from old spec 10. Check message types match orchestrator routing table. |
 | 05 Infrastructure | Needs review | Migrated from old spec 01. Docker Compose is canonical. Check for consistency. |
 | 06 Observability | Needs review | Logging, Grafana/Loki, dashboards. |
 | 07 Cost Tracking | Needs review | Budget enforcement, attribution. |
@@ -46,7 +46,7 @@ identify gaps, clarify details, and resolve open questions.
 | 10 Testing | Needs review | VCR, testcontainers. |
 | 11 Dev Standards | Needs review | ruff, mypy, coverage. |
 | 12 Repo Connection | Needs review | GitHub auth, .ai-team.yaml full schema. |
-| 13 Controller | Needs review | Event router, launcher, watchdog. Largest component spec. |
+| 13 Orchestrator | Needs review | Event router, launcher, watchdog. Largest component spec. |
 | 14 API Server | **Has TODOs** | Request/response schemas, error format, rate limiting. |
 | 15 TUI | **Has TODOs** | Learning chat UX, keybindings, principle browser. |
 | 16 Nelson | Mostly complete | Full consensus algorithm migrated from old spec 04. Needs prompt/tool review. |

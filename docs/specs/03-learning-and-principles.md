@@ -37,7 +37,7 @@ Learning mode can be toggled per-pipeline:
 - **`.ai-team.yaml`**: Sets the default for new pipelines.
 - **TUI**: `learning off` / `learning on` / `learning status` commands.
 - **GitHub**: Add/remove the `learning-mode` label on the feature issue/PR.
-  The controller watches for label changes via webhooks.
+  The orchestrator watches for label changes via webhooks.
 
 The pipeline record in PostgreSQL tracks when learning mode was active:
 

@@ -341,7 +341,7 @@ The API server supports the following TUI features (see spec 15 for TUI details)
 | Spec | Relationship |
 |------|-------------|
 | 05   | Infrastructure spec defines the Docker Compose service entry for the API server, networking, and port exposure |
-| 13   | Controller handles internal orchestration; API server handles external access. They share Redis and PostgreSQL but don't communicate directly |
+| 13   | Orchestrator handles internal orchestration; API server handles external access. They share Redis and PostgreSQL but don't communicate directly |
 | 15   | TUI is the primary consumer of the API server. All TUI features map to API endpoints listed above |
 | 09   | Security spec covers authentication hardening, TLS, and access control for the API |
 | 04   | API server reads from Redis Streams to power SSE endpoints |

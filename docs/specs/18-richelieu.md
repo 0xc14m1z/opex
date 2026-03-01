@@ -31,9 +31,9 @@ Richelieu is one of only two agents with write access to the filesystem
 
 ## Lifecycle
 
-- **Spawned when**: A `git_request` message appears on `pipeline:{id}:git_ops` (see spec 13-controller).
+- **Spawned when**: A `git_request` message appears on `pipeline:{id}:git_ops` (see spec 13-orchestrator).
 - **Exits when**: Publishes a `git_response` to `pipeline:{id}:git_ops`.
-- **Parallelism**: 1 per branch (serialized). Multiple Richelieu instances can run in parallel across different branches, but operations on the same branch are serialized by the controller to prevent race conditions.
+- **Parallelism**: 1 per branch (serialized). Multiple Richelieu instances can run in parallel across different branches, but operations on the same branch are serialized by the orchestrator to prevent race conditions.
 
 ---
 
@@ -189,7 +189,7 @@ the other to become outdated or have conflicts.
 Task-1 PR merges into feature/add-auth
     |
     v
-Controller detects task-2 PR is outdated
+Orchestrator detects task-2 PR is outdated
     |
     v
 Spawns Richelieu to rebase task-2 onto feature/add-auth
@@ -212,9 +212,9 @@ Katherine re-reviews if the rebase changed code (not just a clean fast-forward).
 
 ## Interaction with Other Agents
 
-- **Controller (spec 13-controller)**: The controller dispatches all `git_request` messages and consumes `git_response` results. The controller serializes operations per-branch.
+- **Orchestrator (spec 13-orchestrator)**: The orchestrator dispatches all `git_request` messages and consumes `git_response` results. The orchestrator serializes operations per-branch.
 - **Leonard (spec 20-leonard)**: Leonard works within the worktree that Richelieu provisions. Leonard commits to the task branch; Richelieu handles everything else (push, merge, PR).
-- **Katherine (spec 21)**: After Katherine approves, the controller tells Richelieu to merge. If rebase changes code, Katherine re-reviews.
+- **Katherine (spec 21)**: After Katherine approves, the orchestrator tells Richelieu to merge. If rebase changes code, Katherine re-reviews.
 - **Nelson (spec 16)**: Richelieu may request Nelson consensus on conflict resolution strategy in complex cases (rare).
 
 ---
@@ -268,7 +268,7 @@ Expected tools:
 
 - **Merge conflict (unresolvable)**: Mark task as `needs_human`. Preserve all branches and worktrees for manual intervention. Emit status event with conflicting file list.
 - **GitHub API failure**: Retry with exponential backoff up to 3 times. If persistent, escalate to human.
-- **Container crash**: The controller respawns Richelieu with the same `git_request`. Git operations are idempotent (create branch that exists -> no-op, etc.).
+- **Container crash**: The orchestrator respawns Richelieu with the same `git_request`. Git operations are idempotent (create branch that exists -> no-op, etc.).
 - **Push rejected**: If a push is rejected (e.g., branch protection), report the error and escalate to human.
 
 ---

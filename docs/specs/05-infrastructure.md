@@ -9,7 +9,7 @@ container architecture, networking, volume layout, image builds, resource
 limits, security boundaries, and multi-machine scaling strategy. Other specs
 reference this one for infrastructure details.
 
-The controller (spec 13) dynamically manages ephemeral agent containers on top
+The orchestrator (spec 13) dynamically manages ephemeral agent containers on top
 of this infrastructure. The API server (spec 14) is the sole external interface.
 
 ---
@@ -24,7 +24,7 @@ of this infrastructure. The API server (spec 14) is the sole external interface.
 │  ┌─ Always-running (docker-compose.yml) ───────────────────────────────┐ │
 │  │                                                                       │ │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    │ │
-│  │  │  Redis    │  │PostgreSQL│  │Controller │  │   API Server     │    │ │
+│  │  │  Redis    │  │PostgreSQL│  │Orchestrator │  │   API Server     │    │ │
 │  │  │ (internal)│  │(internal)│  │(orchestr.)│  │   :8080 (ext)    │    │ │
 │  │  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘    │ │
 │  │                                                                       │ │
@@ -34,7 +34,7 @@ of this infrastructure. The API server (spec 14) is the sole external interface.
 │  │  └──────────┘  └──────────┘  └─────────────────┘                    │ │
 │  └───────────────────────────────────────────────────────────────────────┘ │
 │                                                                           │
-│  ┌─ Ephemeral (spawned by Controller on demand) ────────────────────────┐│
+│  ┌─ Ephemeral (spawned by Orchestrator on demand) ────────────────────────┐│
 │  │                                                                       ││
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    ││
 │  │  │  Nelson   │  │  Julius  │  │ Sherlock │  │  Leonard (x N)    │    ││
@@ -115,12 +115,12 @@ All data paths are mounted as named Docker volumes to support cloud volume provi
 
 ## Docker Compose Structure
 
-This is the **canonical** `docker-compose.yml` definition. Spec 06 (controller) and
+This is the **canonical** `docker-compose.yml` definition. Spec 06 (orchestrator) and
 other specs reference this section rather than duplicating it.
 
 ```yaml
-# docker-compose.yml — infrastructure + controller + API server
-# ALL agents are ephemeral, spawned by the controller on demand.
+# docker-compose.yml — infrastructure + orchestrator + API server
+# ALL agents are ephemeral, spawned by the orchestrator on demand.
 
 x-logging: &default-logging
   driver: loki
@@ -192,8 +192,8 @@ services:
     privileged: true
     # No Loki logging driver — infrastructure service.
 
-  controller:
-    build: ./controller
+  orchestrator:
+    build: ./orchestrator
     env_file: .env
     environment:
       DOCKER_HOST: tcp://docker-proxy:2375
@@ -206,7 +206,7 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c",
-        "import redis; r=redis.Redis(host='redis'); assert r.get('controller:heartbeat')"]
+        "import redis; r=redis.Redis(host='redis'); assert r.get('orchestrator:heartbeat')"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -227,7 +227,7 @@ services:
     logging: *default-logging
 
   # ALL agents (Nelson, Julius, Sherlock, Leonard, Katherine, Richelieu)
-  # are ephemeral containers launched by the controller on demand.
+  # are ephemeral containers launched by the orchestrator on demand.
   # See "All-Ephemeral Agent Model" below and spec 13.
 
 volumes:
@@ -249,7 +249,7 @@ networks:
 |----------------|----------------|----------------------------------------------|
 | Redis          | Loki           | Capture Redis warnings and slow log entries  |
 | PostgreSQL     | Loki           | Capture query errors and connection issues   |
-| Controller     | Loki           | Primary orchestration logs                   |
+| Orchestrator     | Loki           | Primary orchestration logs                   |
 | API Server     | Loki           | Request/response logs                        |
 | Loki           | json-file      | Cannot log to itself (circular dependency)   |
 | Grafana        | json-file      | Infrastructure service, `docker logs` access |
@@ -261,16 +261,16 @@ networks:
 ## All-Ephemeral Agent Model
 
 **Every agent** — including Nelson and Richelieu — is an ephemeral container
-spawned by the controller on demand. No agents are defined in `docker-compose.yml`.
+spawned by the orchestrator on demand. No agents are defined in `docker-compose.yml`.
 
 This gives us:
 - **Uniform lifecycle**: Every agent follows the same spawn → work → exit pattern.
-  The controller manages retries, health, and cleanup for all of them.
+  The orchestrator manages retries, health, and cleanup for all of them.
 - **Horizontal scaling**: When multiple consensus requests arrive simultaneously,
-  the controller spawns multiple Nelson instances. Same for parallel Richelieus
+  the orchestrator spawns multiple Nelson instances. Same for parallel Richelieus
   on non-conflicting git operations.
 - **Resource efficiency**: No idle agent containers burning memory.
-- **Multi-machine ready**: The controller's Launcher is the only component that
+- **Multi-machine ready**: The orchestrator's Launcher is the only component that
   talks to the container runtime. Swapping Docker SDK for Kubernetes Jobs or
   ECS Tasks makes all agents run across a cluster (see Scaling below).
 
@@ -403,14 +403,14 @@ override values take precedence.
 
 ## Docker Socket Security
 
-The controller needs Docker API access to spawn agent containers. Instead of
+The orchestrator needs Docker API access to spawn agent containers. Instead of
 mounting the raw Docker socket (which grants full host-level Docker access), a
-**socket proxy** restricts the controller to only the operations it needs.
+**socket proxy** restricts the orchestrator to only the operations it needs.
 
 ### Architecture
 
 ```
-Controller  ──TCP:2375──→  Docker Socket Proxy  ──unix──→  /var/run/docker.sock
+Orchestrator  ──TCP:2375──→  Docker Socket Proxy  ──unix──→  /var/run/docker.sock
                            (tecnativa/docker-socket-proxy)
                            Only allows:
                            - Container create/start/stop/inspect/wait/remove
@@ -426,9 +426,9 @@ Controller  ──TCP:2375──→  Docker Socket Proxy  ──unix──→  /
 
 | Risk                                 | Mitigation                                    |
 |--------------------------------------|-----------------------------------------------|
-| Compromised controller spawns rogue container | Socket proxy blocks unauthorized operations |
-| Controller accesses host filesystem  | Socket proxy blocks volume creation           |
-| Controller modifies network topology | Socket proxy blocks network operations        |
+| Compromised orchestrator spawns rogue container | Socket proxy blocks unauthorized operations |
+| Orchestrator accesses host filesystem  | Socket proxy blocks volume creation           |
+| Orchestrator modifies network topology | Socket proxy blocks network operations        |
 | Proxy itself is compromised          | Proxy runs with minimal attack surface, no exposed ports |
 
 ---
@@ -463,22 +463,22 @@ added as a Docker Compose service. This is explicitly deferred — see spec 09.
 
 ```makefile
 # ─── Build ───────────────────────────────────────────────
-build:              # Build all images (base + all agents + controller + api)
+build:              # Build all images (base + all agents + orchestrator + api)
 build-base:         # Build shared base image only
 build-agent:        # Build single agent image (make build-agent AGENT=leonard)
-build-controller:   # Build controller image
+build-orchestrator:   # Build orchestrator image
 build-api:          # Build API server image
 
 # ─── Stack ───────────────────────────────────────────────
 up:                 # Start the full stack (docker compose up -d)
 down:               # Stop all services (including ephemeral agents)
-restart:            # Restart a service (make restart SVC=controller)
+restart:            # Restart a service (make restart SVC=orchestrator)
 
 # ─── Debugging ───────────────────────────────────────────
 logs:               # Tail logs from all services
 logs-agent:         # Tail logs from a specific agent (make logs-agent AGENT=nelson)
 status:             # Show running containers and health
-shell:              # Shell into a running container (make shell SVC=controller)
+shell:              # Shell into a running container (make shell SVC=orchestrator)
 db-shell:           # psql into PostgreSQL
 redis-cli:          # Connect to Redis CLI
 
@@ -534,13 +534,13 @@ DAILY_BUDGET_HARD=100.00                  # USD per day across all tasks
 |-------------|-----------------------------------------------------|----------|
 | Redis       | `redis-cli ping` (Docker Compose healthcheck)       | 5s       |
 | PostgreSQL  | `pg_isready -U ai_team` (Docker Compose healthcheck)| 5s       |
-| Controller  | Redis heartbeat key (`controller:heartbeat`)        | 10s write, 15s check |
+| Orchestrator  | Redis heartbeat key (`orchestrator:heartbeat`)        | 10s write, 15s check |
 | API Server  | `/health` endpoint (Docker Compose healthcheck)     | 15s      |
 | Agents      | Redis `status` stream heartbeats (every 30s)        | 30s      |
 | Loki        | Process-alive (Docker Compose default)              | —        |
 | Grafana     | Process-alive (Docker Compose default)              | —        |
 
-The controller's watchdog monitors agent heartbeats and Docker container status.
+The orchestrator's watchdog monitors agent heartbeats and Docker container status.
 See spec 13 for watchdog details.
 
 ---
@@ -560,7 +560,7 @@ The system already has the right boundaries for multi-machine scaling:
    Postgres. Reachable from any node.
 3. **All agents are ephemeral and stateless** — they receive input via Redis, do work,
    publish results, and exit. No local state between runs (checkpoints are in PostgreSQL).
-4. **The controller is the only component that talks to the container runtime** — it's
+4. **The orchestrator is the only component that talks to the container runtime** — it's
    the single point where Docker SDK calls live (via the Launcher abstraction).
 5. **The API server is stateless** — it reads from Redis/PostgreSQL. Can be replicated
    behind a load balancer.
@@ -571,15 +571,15 @@ The system already has the right boundaries for multi-machine scaling:
 |-------------|-------------------------|---------------------------------------|
 | Redis       | Local container         | ElastiCache / Memorystore             |
 | PostgreSQL  | Local container         | RDS / Cloud SQL / managed Postgres    |
-| Controller  | Local container         | Single pod/task (leader election for HA) |
+| Orchestrator  | Local container         | Single pod/task (leader election for HA) |
 | API Server  | Local container         | Multiple replicas behind load balancer |
 | Agents      | Local containers        | Jobs/tasks across cluster nodes       |
 | Loki+Grafana| Local containers        | Managed observability (CloudWatch, GCP Logging) or self-hosted in cluster |
 | Images      | Local builds            | Container registry (GHCR, ECR, GCR)   |
 
-### Scaling the controller
+### Scaling the orchestrator
 
-The controller is lightweight (event router + container launcher). A single instance
+The orchestrator is lightweight (event router + container launcher). A single instance
 handles hundreds of pipelines. For high availability:
 - Run 2+ replicas with Redis-based leader election.
 - Only the leader processes events and spawns containers.
@@ -598,7 +598,7 @@ No special networking is needed beyond what the orchestrator provides.
 | Spec | Relationship |
 |------|-------------|
 | 05 (this) | Docker Compose, volumes, networking, image builds, resource limits, Docker socket security, egress policy, Makefile, environment, health checks, scaling |
-| 06 | Controller owns the Launcher Protocol, ephemeral container lifecycle, and dynamic container management on top of this infrastructure |
+| 06 | Orchestrator owns the Launcher Protocol, ephemeral container lifecycle, and dynamic container management on top of this infrastructure |
 | 07 | API server deployment details (service definition in Docker Compose above) |
 | 08 | TUI is a standalone client connecting to the API server exposed by this infrastructure |
 | 09 | Threat model, container hardening, prompt injection defense — builds on socket security and egress policy defined here |

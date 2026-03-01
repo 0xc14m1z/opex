@@ -521,7 +521,7 @@ Mockup:
 | Spec | Relationship |
 |------|-------------|
 | 05   | Infrastructure spec defines that the TUI is NOT a Docker Compose service — it runs standalone on the host |
-| 06   | Controller publishes pipeline events that the TUI consumes via API server SSE |
+| 06   | Orchestrator publishes pipeline events that the TUI consumes via API server SSE |
 | 07   | API server is the sole interface the TUI connects to. All TUI features map to API endpoints |
 | 09   | Security spec covers TUI authentication (API token), connection security |
 | 10   | Redis Streams protocol — the TUI does not read Redis directly; it reads via API server SSE |

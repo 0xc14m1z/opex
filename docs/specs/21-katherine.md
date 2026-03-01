@@ -31,7 +31,7 @@ operate more independently.
 
 ## Lifecycle
 
-- **Spawned when**: Leonard publishes `implementation_complete` for a task. The controller (spec 13-controller) spawns Katherine.
+- **Spawned when**: Leonard publishes `implementation_complete` for a task. The orchestrator (spec 13-orchestrator) spawns Katherine.
 - **Exits when**: Publishes `review_result` (approved, changes_requested, or escalated) to `pipeline:{id}:reviews`.
 - **Parallelism**: Up to `max_parallel_katherines` (default: 3) running simultaneously.
 
@@ -163,7 +163,7 @@ review:
 ### Step 6: Publish Result
 
 - Publish `review_result:approved` with the human review score and threshold decision.
-- The controller then tells Richelieu to merge (if auto-approved) or waits for human review.
+- The orchestrator then tells Richelieu to merge (if auto-approved) or waits for human review.
 
 ---
 
@@ -201,8 +201,8 @@ based on the team's specific patterns and risk tolerance.
 
 - **Leonard (spec 20-leonard)**: Katherine reviews Leonard's code. If changes are needed, Katherine publishes structured feedback. Leonard receives the feedback and iterates. This loop continues until Katherine approves or escalates.
 - **Nelson (spec 16)**: Katherine uses Nelson for both the code review consensus and the human review scoring consensus. Nelson is Katherine's primary decision-making tool.
-- **Richelieu (spec 18)**: Katherine posts review comments on the task PR via the controller (which dispatches to Richelieu). After approval, the controller tells Richelieu to merge.
-- **Controller (spec 13-controller)**: The controller spawns Katherine, consumes review results, and orchestrates the rework loop or merge.
+- **Richelieu (spec 18)**: Katherine posts review comments on the task PR via the orchestrator (which dispatches to Richelieu). After approval, the orchestrator tells Richelieu to merge.
+- **Orchestrator (spec 13-orchestrator)**: The orchestrator spawns Katherine, consumes review results, and orchestrates the rework loop or merge.
 - **Sherlock (spec 19)**: Katherine reads Sherlock's execution plan to understand what was expected and verify the implementation matches.
 
 ---
@@ -256,11 +256,11 @@ Expected tools:
 
 - **Nelson failure during review**: If Nelson cannot reach consensus on any review
   dimension, Katherine escalates the review to human (`review_result:escalated`).
-- **Container crash**: The controller respawns Katherine with the same task context.
+- **Container crash**: The orchestrator respawns Katherine with the same task context.
   Since Katherine is stateless (reads diff and context from git/Redis), a respawn
   starts the review from scratch.
 - **Rework loop limit**: If Leonard fails to address feedback after N rework
-  iterations (tracked by the controller), Katherine escalates to human.
+  iterations (tracked by the orchestrator), Katherine escalates to human.
 - **Diff too large**: If the diff exceeds a size threshold, Katherine flags for
   human review regardless of score (large diffs are inherently risky).
 
