@@ -22,8 +22,9 @@ A pipeline transitions through these states:
 
 ```
 CREATED → DECOMPOSING → IN_PROGRESS → COMPLETING → COMPLETED
-                                                  ↘ FAILED
-                                        CANCELLED (from any state)
+                                    ↘ PARTIALLY_FAILED → COMPLETED (after retry)
+                                                       → CANCELLED (human abandons)
+                                        CANCELLED (from any state, by human)
 ```
 
 | Status | Description |
@@ -33,8 +34,15 @@ CREATED → DECOMPOSING → IN_PROGRESS → COMPLETING → COMPLETED
 | `IN_PROGRESS` | Tasks are being processed |
 | `COMPLETING` | All tasks done, opening PR |
 | `COMPLETED` | PR opened |
-| `FAILED` | Unrecoverable failure |
-| `CANCELLED` | Cancelled by human |
+| `PARTIALLY_FAILED` | Some tasks succeeded, some need human intervention. Pipeline can recover via retry or human takeover. |
+| `CANCELLED` | Explicitly cancelled by human |
+
+> **Design principle (P8 — No Silent Failures):** There is no automatic
+> `FAILED` terminal state for pipelines. The system never gives up
+> autonomously. Every failure escalates to a human who can retry with
+> more context, take over manually, or explicitly cancel. The only way
+> a pipeline terminates without success is by explicit human decision
+> (`CANCELLED`).
 
 ---
 
@@ -228,6 +236,267 @@ The orchestrator respects per-agent parallelism limits (see spec 13 for
 
 If more tasks are ready than the parallelism limit allows, the orchestrator
 queues them and launches as slots become available.
+
+---
+
+## Task Lifecycle
+
+Each task in a pipeline transitions through these states:
+
+```
+PENDING
+  │
+  ▼
+ENRICHING (Sherlock running)
+  │
+  ▼
+READY (worktree created)
+  │
+  ▼
+IMPLEMENTING (Leonard running)
+  │
+  ▼
+IN_REVIEW (Katherine running)
+  │
+  ├── approved → MERGING → COMPLETED → (unblock dependents, evaluate graph)
+  │
+  ├── changes_requested → REWORK → IMPLEMENTING (review loop)
+  │
+  └── escalated (auto-retries exhausted) → NEEDS_HUMAN
+                                              │
+                                ┌──────────────┼───────────────────┐
+                                ▼              ▼                   ▼
+                          [Investigate]   [Take over]        [Cancel pipeline]
+                               │              │
+                               ▼              ▼
+                       Diagnostic chat   ABANDONED_HUMAN_TAKEOVER
+                               │              │
+                     ┌─────────┴──────┐    Human: "I'm done"
+                     ▼                ▼       │
+               Add context      Edit task    Katherine verifies
+                     │                │       │
+                     ▼                ▼    ┌──┴──┐
+                  RETRYING         RETRYING │    │
+                     │                │   pass  fail
+                     ▼                ▼    │    │
+                  ENRICHING       ENRICHING │    └→ stays, report back
+                  (new attempt)            ▼
+                                    COMPLETED_EXTERNALLY
+                                    (unblocks dependents)
+
+Terminal states:
+  COMPLETED              — system finished the task
+  COMPLETED_EXTERNALLY   — human finished the task, Katherine verified
+  CANCELLED              — human cancelled the pipeline
+
+Non-terminal waiting states:
+  NEEDS_HUMAN                — waiting for human decision
+  ABANDONED_HUMAN_TAKEOVER   — human took over, doing work externally
+```
+
+> **Design principle (P8 — No Silent Failures):** There is no automatic
+> `FAILED` terminal state for tasks. When auto-retries are exhausted, the
+> task moves to `NEEDS_HUMAN`, not `FAILED`. The system always escalates
+> to a human rather than silently giving up.
+
+---
+
+## Failure Handling
+
+### Failure granularity: task-level
+
+A single task failure does **not** fail the pipeline or kill sibling tasks.
+Independent tasks continue running. The pipeline only enters
+`PARTIALLY_FAILED` when all runnable work is done and at least one task
+is stuck in `NEEDS_HUMAN` or `ABANDONED_HUMAN_TAKEOVER`.
+
+### Retry mechanics
+
+- **Retry count**: Configurable in `.ai-team.yaml` under `retries.max_task_retries`
+  (default: 2 retries = 3 total attempts). Overridable per-pipeline from the TUI.
+- **Retry strategy: from scratch.** Leonard makes a **single commit** at task
+  completion — no intermediate commits. Julius creates tasks small enough
+  that restarting is cheap. On retry, the previous attempt's branch work is
+  discarded (branch reset to feature branch HEAD).
+- **Retry trigger**: After the Leonard → Katherine review loop exhausts max
+  review cycles (see Issue 11), or after an agent container crashes/OOMs
+  and agent-level retries (spec 08) are exhausted.
+- **After auto-retries exhausted**: Task → `NEEDS_HUMAN`. Always escalates,
+  never auto-fails.
+
+### Attempt history
+
+Each task attempt is a separate record in PostgreSQL — never overwritten.
+When retrying, a new attempt is created linked to the same task.
+
+```
+task_attempts table:
+  id                 -- UUID
+  task_id            -- FK to tasks
+  attempt_number     -- 1-indexed
+  status             -- 'running' | 'succeeded' | 'failed' | 'abandoned'
+  started_at
+  finished_at
+  failure_reason     -- human-readable
+  exit_code          -- agent container exit code (if applicable)
+  agent_logs_ref     -- reference to logs in Loki
+  diff_snapshot      -- git diff at time of failure (for inspection)
+```
+
+### External dependency failures
+
+- **Redis/PostgreSQL down**: System-level concern, owned by spec 08 (Error
+  Recovery). Orchestrator startup reconciliation handles recovery.
+- **GitHub API down**: Task-level concern. Richelieu retries with exponential
+  backoff (handled by agent retry mechanism in spec 08). After max agent-level
+  retries → task escalates to `NEEDS_HUMAN`.
+
+### Cleanup on failure
+
+Failed attempts preserve branches and worktrees for human inspection.
+Cleanup is manual via a TUI/API command, or automatic via configurable
+TTL (default: 48 hours).
+
+---
+
+## Human Intervention Flow
+
+When a task reaches `NEEDS_HUMAN`, the human has three options: investigate
+and retry, take over manually, or cancel the entire pipeline.
+
+### Option 1: Investigate and retry (diagnostic chat)
+
+A two-phase process mediated by the TUI and API server.
+
+**Phase 1 — Diagnostic Chat**
+
+The human enters a chat session in the TUI (via API server → LLM). This is
+**not** a new agent — it's a stateless conversation handled by the API server
+calling the LLM directly (via LiteLLM/OpenRouter). The chat has access to:
+
+- The failed task's attempt history (logs, diffs, failure reasons)
+- The original task description and all context entries
+- The current state of the codebase (relevant files)
+
+The human and LLM discuss what went wrong, what's missing, and whether the
+task is scoped correctly. No system state changes during this phase.
+
+**At any point during the chat, the human can invoke Nelson consensus** to
+get multi-model validation on a decision before committing to it. Nelson is
+spawned through the normal orchestrator mechanism — the API server publishes
+a `consensus_request` to Redis.
+
+**Phase 2 — Context Distillation**
+
+The human (with LLM assistance) distills the chat into a concise context
+addition. The TUI switches to a **review mode** showing:
+
+- The proposed context addition (what will be added)
+- A **diff view**: task context before vs. after
+- If the task description was edited: a diff of the description changes
+
+The human reviews, can edit further, and explicitly approves. Only on
+approval:
+
+1. The context entry is written to PostgreSQL (`task_context_entries` table)
+2. The task moves to `RETRYING`
+3. The retry counter resets (human context makes this effectively a new problem)
+4. Sherlock is re-spawned with the full context chain
+
+**All chat messages are logged** to PostgreSQL (`diagnostic_chat_sessions`
+and `diagnostic_chat_messages` tables). This ensures full auditability and
+the ability to reconstruct the human's reasoning.
+
+### Human context history
+
+Context additions are **not** just appended — they form a timeline linked
+to the failures that prompted them. When Sherlock enriches a retry, it
+receives all entries in order: the original context, plus each human
+addition tagged with which failure prompted it.
+
+```
+task_context_entries table:
+  id
+  task_id
+  entry_type         -- 'original' | 'human_addition' | 'task_edit'
+  content            -- the actual context text
+  triggered_by       -- FK to task_attempts (which attempt failed; null for 'original')
+  chat_session_id    -- FK to diagnostic_chat_sessions (null for 'original')
+  created_at
+  created_by         -- 'julius' | 'human:{user_id}'
+```
+
+### Task description editing
+
+The human can also edit the task description itself, using the same
+chat-mediated workflow: describe the changes in chat → LLM makes the
+edits → TUI shows a **diff** (before/after) → human approves → stored
+as `entry_type: 'task_edit'` in the context history.
+
+### Option 2: Human takeover
+
+The human decides to do the work themselves outside the system.
+
+```
+Task → ABANDONED_HUMAN_TAKEOVER
+    │
+    (human works outside the system)
+    │
+    Human returns to TUI: "I'm done"
+    │
+    ▼
+Katherine runs in verify_prerequisites mode:
+    ├── Does the expected branch exist?
+    ├── Are the changes committed and pushed?
+    ├── Do the tests pass? (from .ai-team.yaml commands)
+    ├── Does lint pass?
+    ├── Are the dependent tasks' requirements met?
+    │
+    ├── All checks pass → COMPLETED_EXTERNALLY (dependents unblocked)
+    └── Some checks fail → stays ABANDONED_HUMAN_TAKEOVER (report to human)
+```
+
+Katherine's `verify_prerequisites` mode is a reusable capability — a
+validation-only run that checks code quality and completeness without
+performing a full review cycle. See spec 21 for Katherine's modes.
+
+### Option 3: Cancel the pipeline
+
+The human decides the whole feature isn't worth pursuing.
+
+```
+Pipeline → CANCELLED
+    │
+    All running tasks → CANCELLED
+    All pending tasks → CANCELLED
+    │
+    Cancellation record stored:
+      - reason (human-provided text via TUI)
+      - which tasks completed vs. were in-progress
+      - what branches/PRs exist
+      - timestamp
+    │
+    Branches/PRs are NOT auto-deleted (human may want to salvage).
+    Cleanup available via TUI command or TTL auto-cleanup.
+```
+
+---
+
+## Retry Configuration
+
+### In `.ai-team.yaml`
+
+```yaml
+retries:
+  max_task_retries: 2          # 2 retries = 3 total attempts (default)
+  cleanup_ttl_hours: 48        # Auto-cleanup failed branches after 48h
+```
+
+### Per-pipeline override from TUI
+
+The human can override `max_task_retries` when creating a pipeline or when
+a task reaches `NEEDS_HUMAN` (e.g., "give this one 5 tries"). The override
+is stored in the pipeline record in PostgreSQL.
 
 ---
 

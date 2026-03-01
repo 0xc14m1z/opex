@@ -43,16 +43,21 @@ class AgentName(StrEnum):
     RICHELIEU = "richelieu"
 
 class TaskStatus(StrEnum):
-    PENDING = "pending"              # Created, waiting for dependencies
-    READY = "ready"                  # Dependencies met, can be picked up
-    ENRICHING = "enriching"          # Sherlock is analyzing
-    IN_PROGRESS = "in_progress"      # Leonard is implementing
-    IN_REVIEW = "in_review"          # Katherine is reviewing
-    REWORK = "rework"                # Leonard is fixing review feedback
-    COMPLETED = "completed"          # Merged into feature branch
-    FAILED = "failed"                # Max retries exceeded
-    CANCELLED = "cancelled"          # Cancelled by human
-    NEEDS_HUMAN = "needs_human"      # Escalated, waiting for human
+    PENDING = "pending"                          # Created, waiting for dependencies
+    READY = "ready"                              # Dependencies met, can be picked up
+    ENRICHING = "enriching"                      # Sherlock is analyzing
+    IN_PROGRESS = "in_progress"                  # Leonard is implementing
+    IN_REVIEW = "in_review"                      # Katherine is reviewing
+    REWORK = "rework"                            # Leonard is fixing review feedback
+    MERGING = "merging"                          # Richelieu is merging the task PR
+    RETRYING = "retrying"                        # New attempt starting (after human context)
+    NEEDS_HUMAN = "needs_human"                  # Escalated, waiting for human decision
+    ABANDONED_HUMAN_TAKEOVER = "abandoned_human_takeover"  # Human took over externally
+    COMPLETED = "completed"                      # Merged into feature branch
+    COMPLETED_EXTERNALLY = "completed_externally"  # Human finished, Katherine verified
+    CANCELLED = "cancelled"                      # Cancelled by human (pipeline-level)
+    # NOTE: There is no FAILED state. The system never gives up autonomously.
+    # All failures escalate to NEEDS_HUMAN. See spec 01 (P8 — No Silent Failures).
 
 class PipelineStatus(StrEnum):
     CREATED = "created"              # Plan received, not yet started
@@ -60,8 +65,11 @@ class PipelineStatus(StrEnum):
     IN_PROGRESS = "in_progress"      # Tasks are being processed
     COMPLETING = "completing"        # All tasks done, opening PR
     COMPLETED = "completed"          # PR opened
-    FAILED = "failed"                # Unrecoverable failure
-    CANCELLED = "cancelled"          # Cancelled by human
+    PARTIALLY_FAILED = "partially_failed"  # Some tasks need human intervention
+    CANCELLED = "cancelled"          # Explicitly cancelled by human
+    # NOTE: There is no FAILED state. See spec 01 (P8 — No Silent Failures).
+    # PARTIALLY_FAILED can recover via retry or human takeover → COMPLETED,
+    # or be explicitly cancelled by the human → CANCELLED.
 
 class Priority(StrEnum):
     LOW = "low"
@@ -129,6 +137,10 @@ class BudgetConfig(BaseModel):
     soft_limit_per_task: float = 5.0
     hard_limit_per_task: float = 20.0
 
+class RetryConfig(BaseModel):
+    max_task_retries: int = 2              # 2 retries = 3 total attempts
+    cleanup_ttl_hours: int = 48            # Auto-cleanup failed branches after N hours
+
 class LLMConsensusConfig(BaseModel):
     models: list[str]                          # At least 2 for meaningful consensus
     max_rounds: int = 3
@@ -150,6 +162,7 @@ class AiTeamConfig(BaseModel):
     review: ReviewConfig = ReviewConfig()
     intake: IntakeConfig = IntakeConfig()
     budget: BudgetConfig = BudgetConfig()
+    retries: RetryConfig = RetryConfig()       # Task retry configuration (spec 01)
     llm: LLMConfig                             # Model selection config
 ```
 
@@ -462,6 +475,62 @@ class Checkpoint(BaseModel):
     expires_at: datetime
 ```
 
+## Task Attempt & Human Intervention Models
+
+These models support the failure handling and human intervention flows
+defined in spec 01. See spec 01 for the full task lifecycle and P8
+(No Silent Failures) design principle.
+
+```python
+# models/task.py (additional models)
+
+class TaskAttempt(BaseModel):
+    """A single attempt at completing a task. Never overwritten."""
+    id: str                                  # UUID
+    task_id: str
+    attempt_number: int                      # 1-indexed
+    status: Literal["running", "succeeded", "failed", "abandoned"]
+    started_at: datetime
+    finished_at: datetime | None = None
+    failure_reason: str | None = None        # Human-readable
+    exit_code: int | None = None             # Agent container exit code
+    agent_logs_ref: str | None = None        # Reference to logs in Loki
+    diff_snapshot: str | None = None         # Git diff at time of failure
+
+
+class TaskContextEntry(BaseModel):
+    """An entry in the context chain for a task. Supports timeline reconstruction."""
+    id: str                                  # UUID
+    task_id: str
+    entry_type: Literal["original", "human_addition", "task_edit"]
+    content: str                             # The actual context text
+    triggered_by: str | None = None          # FK to TaskAttempt.id (which attempt failed)
+    chat_session_id: str | None = None       # FK to DiagnosticChatSession.id
+    created_at: datetime
+    created_by: str                          # "julius" | "human:{user_id}"
+
+
+class DiagnosticChatSession(BaseModel):
+    """A diagnostic chat session between a human and an LLM about a failed task."""
+    id: str                                  # UUID
+    task_id: str
+    pipeline_id: str
+    started_at: datetime
+    ended_at: datetime | None = None
+    outcome: Literal["context_added", "task_edited", "abandoned", "cancelled"] | None = None
+
+
+class DiagnosticChatMessage(BaseModel):
+    """A single message in a diagnostic chat session."""
+    id: str                                  # UUID
+    session_id: str                          # FK to DiagnosticChatSession.id
+    role: Literal["human", "assistant", "nelson_consensus"]
+    content: str
+    timestamp: datetime
+```
+
+---
+
 ## Orchestrator Models
 
 These payload models are used by the pipeline orchestrator (spec 13) and are the
@@ -516,15 +585,22 @@ class PipelineCompletedPayload(BaseModel):
     human_review_needed: bool
 
 
-class PipelineFailedPayload(BaseModel):
-    """Published by the orchestrator when the pipeline cannot continue."""
+class PipelinePartiallyFailedPayload(BaseModel):
+    """Published by the orchestrator when some tasks need human intervention."""
     pipeline_id: str
-    reason: str
-    failed_task_id: str | None               # None if pipeline-level failure
     tasks_completed: int
-    tasks_remaining: int
+    tasks_needing_human: list[str]           # Task IDs in NEEDS_HUMAN state
+    tasks_pending: int                       # Tasks still waiting (blocked by failed deps)
     total_cost: float
-    recoverable: bool                        # Can human fix and retry?
+
+class PipelineCancelledPayload(BaseModel):
+    """Published when a human explicitly cancels a pipeline."""
+    pipeline_id: str
+    reason: str                              # Human-provided cancellation reason
+    tasks_completed: int
+    tasks_cancelled: int
+    branches_preserved: list[str]            # Branches left for salvage
+    total_cost: float
 ```
 
 ## PostgreSQL Schema
@@ -704,6 +780,52 @@ CREATE TABLE review_threshold_history (
                                              --   - What insights emerged
 );
 
+-- Task attempts (failure history, see spec 01 — Failure Handling)
+CREATE TABLE task_attempts (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    attempt_number INTEGER NOT NULL,
+    status TEXT NOT NULL,                     -- 'running' | 'succeeded' | 'failed' | 'abandoned'
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    failure_reason TEXT,
+    exit_code INTEGER,
+    agent_logs_ref TEXT,                      -- Loki log reference
+    diff_snapshot TEXT,                       -- Git diff at failure
+    UNIQUE (task_id, attempt_number)
+);
+
+-- Task context entries (human intervention history, see spec 01 — Human Intervention Flow)
+CREATE TABLE task_context_entries (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    entry_type TEXT NOT NULL,                 -- 'original' | 'human_addition' | 'task_edit'
+    content TEXT NOT NULL,
+    triggered_by TEXT REFERENCES task_attempts(id),  -- Which attempt failed
+    chat_session_id TEXT,                     -- FK to diagnostic_chat_sessions
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by TEXT NOT NULL                  -- 'julius' | 'human:{user_id}'
+);
+
+-- Diagnostic chat sessions (see spec 01 — Human Intervention Flow)
+CREATE TABLE diagnostic_chat_sessions (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    pipeline_id TEXT NOT NULL REFERENCES pipelines(id),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ended_at TIMESTAMPTZ,
+    outcome TEXT                              -- 'context_added' | 'task_edited' | 'abandoned' | 'cancelled'
+);
+
+-- Diagnostic chat messages
+CREATE TABLE diagnostic_chat_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES diagnostic_chat_sessions(id),
+    role TEXT NOT NULL,                       -- 'human' | 'assistant' | 'nelson_consensus'
+    content TEXT NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX idx_tasks_pipeline ON tasks(pipeline_id);
 CREATE INDEX idx_tasks_status ON tasks(status);
@@ -720,4 +842,9 @@ CREATE INDEX idx_principles_agent ON principles(agent);
 CREATE INDEX idx_learning_conv_pipeline ON learning_conversations(pipeline_id);
 CREATE INDEX idx_learning_conv_task ON learning_conversations(task_id);
 CREATE INDEX idx_threshold_history_timestamp ON review_threshold_history(timestamp);
+CREATE INDEX idx_task_attempts_task ON task_attempts(task_id);
+CREATE INDEX idx_context_entries_task ON task_context_entries(task_id);
+CREATE INDEX idx_chat_sessions_task ON diagnostic_chat_sessions(task_id);
+CREATE INDEX idx_chat_sessions_pipeline ON diagnostic_chat_sessions(pipeline_id);
+CREATE INDEX idx_chat_messages_session ON diagnostic_chat_messages(session_id);
 ```

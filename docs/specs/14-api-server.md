@@ -98,6 +98,23 @@ DELETE /pipelines/:id response body:
 }
 -->
 
+### Task Human Intervention (spec 01 — Human Intervention Flow)
+
+```
+GET    /tasks/:id/attempts                # List all attempts for a task
+GET    /tasks/:id/context                 # Get full context chain for a task
+
+POST   /tasks/:id/chat                    # Start or continue a diagnostic chat session
+GET    /tasks/:id/chat/:session_id        # Get chat session messages
+POST   /tasks/:id/chat/:session_id/consensus  # Invoke Nelson consensus from chat
+
+POST   /tasks/:id/retry                   # Add context and retry (Phase 2 approval)
+POST   /tasks/:id/takeover                # Human takes over the task
+POST   /tasks/:id/complete-external       # Human declares work done → Katherine verifies
+
+PATCH  /pipelines/:id/retries             # Override max_task_retries for a pipeline
+```
+
 ### Learning Mode
 
 ```
@@ -326,6 +343,14 @@ The API server supports the following TUI features (see spec 15 for TUI details)
 | View task progress         | `GET /pipelines/:id`, `GET /stream/pipeline/:id` |
 | Create a new pipeline      | `POST /pipelines`                          |
 | Cancel a pipeline          | `DELETE /pipelines/:id`                    |
+| Override retry limit       | `PATCH /pipelines/:id/retries`             |
+| Diagnostic chat            | `POST /tasks/:id/chat`, `GET /tasks/:id/chat/:sid` |
+| Add context & retry        | `POST /tasks/:id/retry`                    |
+| Human takeover             | `POST /tasks/:id/takeover`                 |
+| Complete external work     | `POST /tasks/:id/complete-external`        |
+| Nelson consensus (in chat) | `POST /tasks/:id/chat/:sid/consensus`      |
+| View attempt history       | `GET /tasks/:id/attempts`                  |
+| View context chain         | `GET /tasks/:id/context`                   |
 | Toggle learning mode       | `POST /pipelines/:id/learning`             |
 | Chat with Nelson (learning)| `POST /chat`, `GET /stream/learning/:id`   |
 | Browse principles          | `GET /principles`                          |

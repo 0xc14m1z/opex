@@ -5,8 +5,22 @@
 ## Overview
 
 Agents crash. LLM APIs go down. Tests flake. The system is designed to handle all of
-these gracefully: checkpoint progress, restart from where it left off, retry up to 3
-times, alert the human, and escalate on total failure.
+these gracefully: checkpoint progress, restart from where it left off, retry with
+configurable limits, and always escalate to a human on failure.
+
+> **Design principle (P8 — No Silent Failures):** The system never gives up
+> autonomously. All failures escalate to `NEEDS_HUMAN`. There is no automatic
+> terminal `FAILED` state. See spec 01 for the full task lifecycle and human
+> intervention flow.
+>
+> **Two levels of recovery:**
+> 1. **Agent-level** (this spec): Within a single task attempt, agent crashes
+>    are recovered via checkpoints. This handles OOM, container restarts, and
+>    transient failures mid-execution.
+> 2. **Task-level** (spec 01): When an entire attempt fails (agent completes
+>    but produces bad output, or agent-level retries are exhausted), the task
+>    is retried from scratch with a new attempt. After `max_task_retries`
+>    attempts, the task escalates to `NEEDS_HUMAN`.
 
 > **Note**: The orchestrator (spec 13) implements handler idempotency and startup
 > reconciliation to ensure that events are never lost or double-processed after a
@@ -34,8 +48,9 @@ Agent encounters error
 │ YES → Restart from  │──── Resume from last checkpoint
 │       checkpoint    │     (not from scratch)
 │                     │
-│ NO  → Escalate      │──── Task marked as "needs_human"
-│       to human      │     Full crash history in TUI
+│ NO  → Escalate to   │──── Task attempt marked as "failed"
+│       task-level     │     Orchestrator evaluates task-level retries
+│       retry (spec 01)│     (see spec 01 — Failure Handling)
 └─────────────────────┘
 ```
 
@@ -248,19 +263,25 @@ containers (Nelson, Julius, Sherlock, Leonard, Katherine, Richelieu):
 If one task in a pipeline fails but others succeed:
 
 1. Completed tasks remain merged into the feature branch.
-2. The failed task is marked as `needs_human`.
-3. Other independent tasks continue (they don't depend on the failed one).
-4. Tasks that depend on the failed task are blocked and marked as `blocked:needs_human`.
-5. The TUI shows which tasks are blocked and why.
+2. The stuck task is marked as `NEEDS_HUMAN` (never auto-`FAILED`).
+3. Other independent tasks continue (they don't depend on the stuck one).
+4. Tasks that depend on the stuck task remain `PENDING` (dependencies unsatisfied).
+5. The TUI shows which tasks are stuck and why.
+6. Pipeline transitions to `PARTIALLY_FAILED` when all runnable work is done.
 
-### Full Pipeline Failure
+The human can then: add context and retry, take over the task manually, or
+cancel the pipeline. See spec 01 — Human Intervention Flow for full details.
 
-If the entire pipeline is unrecoverable:
+### Pipeline Cancellation
+
+There is no automatic "full pipeline failure." Only the human can cancel a
+pipeline (via TUI → `DELETE /pipelines/:id`). On cancellation:
 
 1. Orchestrator stops spawning new agent containers.
-2. All branches and worktrees are preserved (no cleanup).
-3. A summary is posted to the TUI and GitHub issue.
-4. Human can: fix the issue and re-trigger, or abandon the pipeline.
+2. All running containers are stopped gracefully.
+3. All branches and worktrees are preserved (no auto-cleanup).
+4. Cancellation reason is recorded in PostgreSQL.
+5. Human can clean up later via TUI command or TTL auto-cleanup.
 
 ## Cleanup
 

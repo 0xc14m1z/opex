@@ -63,6 +63,14 @@ teams:
 | View task progress         | `GET /pipelines/:id`, `GET /stream/pipeline/:id` |
 | Create a new pipeline      | `POST /pipelines`                          |
 | Cancel a pipeline          | `DELETE /pipelines/:id`                    |
+| Override retry limit       | `PATCH /pipelines/:id/retries`             |
+| Diagnostic chat            | `POST /tasks/:id/chat`, `GET /tasks/:id/chat/:sid` |
+| Add context & retry        | `POST /tasks/:id/retry`                    |
+| Human takeover             | `POST /tasks/:id/takeover`                 |
+| Complete external work     | `POST /tasks/:id/complete-external`        |
+| Nelson consensus (in chat) | `POST /tasks/:id/chat/:sid/consensus`      |
+| View attempt history       | `GET /tasks/:id/attempts`                  |
+| View context chain         | `GET /tasks/:id/context`                   |
 | Toggle learning mode       | `POST /pipelines/:id/learning`             |
 | Chat with Nelson (learning)| `POST /chat`, `GET /stream/learning/:id`   |
 | Browse principles          | `GET /principles`                          |
@@ -290,7 +298,7 @@ When agents need human input, the TUI shows a notification banner:
 │                                                                    │
 │  1. Katherine flagged PR #42 for human review (score: 0.82)       │
 │  2. Nelson couldn't reach consensus on database schema approach    │
-│  3. Leonard failed 3 times on task #7 — needs human guidance     │
+│  3. Task #7 needs human guidance (3 attempts failed)              │
 │                                                                    │
 │  Press [1] [2] [3] to view details, [D]ismiss                    │
 └────────────────────────────────────────────────────────────────────┘
@@ -299,6 +307,82 @@ When agents need human input, the TUI shows a notification banner:
 Escalation events arrive via `GET /stream/pipelines` SSE stream from the API
 server (spec 14). The TUI maintains a notification queue and displays the banner
 when there are unresolved escalations.
+
+### Human Intervention Actions
+
+When a task is in `NEEDS_HUMAN` state, the TUI presents three options:
+
+```
+┌─ Task #7: Add JWT middleware ── NEEDS HUMAN ─────────────────────┐
+│                                                                    │
+│  Attempts: 3/3 exhausted                                          │
+│  Last failure: "Cannot find User model import path"               │
+│                                                                    │
+│  [I]nvestigate     Start diagnostic chat (discuss what's wrong)   │
+│  [T]ake over       Do it yourself, come back when done            │
+│  [C]ancel pipeline Drop the entire feature                        │
+│                                                                    │
+│  [A]ttempt history  View all 3 attempts (logs, diffs, errors)     │
+│  [X] Context chain  View accumulated context for this task        │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### Diagnostic Chat View
+
+The diagnostic chat is a two-phase interaction for investigating failures
+and adding context. See spec 01 — Human Intervention Flow for the full
+design. The TUI provides:
+
+- **Phase 1 — Chat mode**: Conversational interface with the LLM, with
+  access to attempt history, logs, and codebase context. Human can invoke
+  `[N]elson consensus` at any point for multi-model validation.
+- **Phase 2 — Context distillation mode**: Review mode showing the proposed
+  context addition or task edit with a **diff view** (before/after). Human
+  reviews and either `[A]pproves` (triggers retry) or `[E]dits` further.
+
+```
+┌─ Diagnostic Chat: Task #7 ── Phase 1 ───────────────────────────┐
+│                                                                    │
+│  LLM: Looking at attempt 3, Leonard failed because it couldn't   │
+│  find the User model. The import path `models.user.User` doesn't │
+│  exist. Looking at the codebase...                                │
+│                                                                    │
+│  LLM: The User model was moved to `auth/models.py` in a recent  │
+│  refactor. Leonard was using the old path.                        │
+│                                                                    │
+│  Human: Yes, we moved it last week. Also, there's a UserProfile  │
+│  model in the same file that task-3 will need.                    │
+│                                                                    │
+│  [N]elson consensus  [S]witch to context mode  [Q]uit chat       │
+└────────────────────────────────────────────────────────────────────┘
+
+┌─ Context Distillation: Task #7 ── Phase 2 ──────────────────────┐
+│                                                                    │
+│  Proposed context addition:                                       │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ The User model was moved from models/user.py to             │  │
+│  │ auth/models.py. Import as `from auth.models import User,    │  │
+│  │ UserProfile`. Both models are needed for JWT middleware.     │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│  Context chain (cumulative):                                      │
+│    1. [original] JWT middleware task description (by julius)       │
+│    2. [human_addition] ← NEW (triggered by attempt #3)           │
+│                                                                    │
+│  [A]pprove & retry  [E]dit  [B]ack to chat  [C]ancel             │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### Diff View Capability
+
+The TUI supports **diff views** for comparing before/after states. This is
+used in:
+- Context distillation (context chain before vs. after addition)
+- Task description editing (original vs. modified description)
+- Attempt comparison (diff from attempt 1 vs. attempt 2)
+
+Diff rendering uses Textual's built-in rich text capabilities with
+side-by-side or unified diff format, color-coded additions/deletions.
 
 ---
 
