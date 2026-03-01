@@ -19,7 +19,7 @@ core/src/opex_core/models/
 ├── config.py            # .opex.yaml schema
 ├── task.py              # Tasks, execution plans, dependency graphs
 ├── consensus.py         # Consensus requests, responses, weights
-├── review.py            # Code review, human review scoring
+├── review.py            # Code review, confidence scoring
 ├── git.py               # Git operations, branches, worktrees
 ├── cost.py              # Cost records, budget limits
 ├── messages.py          # Redis message envelopes and payloads
@@ -120,7 +120,7 @@ class GitConfig(BaseModel):
     conventional_commits: bool = True
 
 class ReviewConfig(BaseModel):
-    human_review_threshold: float = 0.7
+    confidence_threshold: float = 0.7
     always_human_review: list[str] = []
     never_auto_approve: list[str] = []
 
@@ -345,15 +345,15 @@ class ReviewComment(BaseModel):
     suggested_fix: str | None = None
 
 
-class HumanReviewScore(BaseModel):
-    """Nelson-calculated score determining if human review is needed."""
+class ConfidenceScore(BaseModel):
+    """Nelson-calculated confidence score. Low confidence triggers human review."""
     task_id: str
-    novelty: float                           # 0.0 – 1.0
-    complexity: float                        # 0.0 – 1.0
+    novelty: float                           # 0.0 – 1.0 (higher = more novel = less confident)
+    complexity: float                        # 0.0 – 1.0 (higher = more complex = less confident)
     ai_confidence: float                     # Nelson's consensus confidence
-    risk: float                              # 0.0 – 1.0
-    composite_score: float                   # Weighted combination
-    needs_human: bool                        # score > threshold
+    risk: float                              # 0.0 – 1.0 (higher = riskier = less confident)
+    composite_score: float                   # Weighted combination (0.0 – 1.0, higher = more confident)
+    needs_human: bool                        # score < threshold
     reasoning: str                           # Why this score
 
 
@@ -361,7 +361,7 @@ class ReviewResult(BaseModel):
     task_id: str
     decision: Literal["approved", "changes_requested", "escalated"]
     comments: list[ReviewComment]
-    human_review_score: HumanReviewScore
+    confidence_score: ConfidenceScore
     consensus_id: str                        # Which Nelson consensus backed this
     reviewed_at: datetime
 

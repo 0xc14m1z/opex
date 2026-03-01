@@ -125,7 +125,7 @@ reference for its domain.
 | 18 | [`18-richelieu.md`](18-richelieu.md) | Richelieu deep dive: git operations, worktree management, PR creation, conflict resolution. |
 | 19 | [`19-sherlock.md`](19-sherlock.md) | Sherlock deep dive: codebase inspection, execution plan generation. |
 | 20 | [`20-leonard.md`](20-leonard.md) | Leonard deep dive: code implementation, test execution, validation, simplification. |
-| 21 | [`21-katherine.md`](21-katherine.md) | Katherine deep dive: code review, human review scoring, adaptive threshold. |
+| 21 | [`21-katherine.md`](21-katherine.md) | Katherine deep dive: code review, confidence scoring, adaptive threshold. |
 
 ---
 
@@ -171,7 +171,7 @@ opex/
 │   │       ├── models/
 │   │       │   ├── __init__.py
 │   │       │   ├── task.py            # Task, ExecutionPlan, DependencyGraph
-│   │       │   ├── review.py          # ReviewResult, HumanReviewScore
+│   │       │   ├── review.py          # ReviewResult, ConfidenceScore
 │   │       │   └── config.py          # .opex.yaml schema
 │   │       ├── queue/
 │   │       │   ├── __init__.py
@@ -412,7 +412,7 @@ llm:
 
 # Scoring overrides
 review:
-  human_review_threshold: 0.7         # Score above this → human review required
+  confidence_threshold: 0.7            # Confidence below this → human review required
   always_human_review:
     - "migrations/"                   # Always flag changes to these paths
     - "infrastructure/"
@@ -523,7 +523,7 @@ review:
 - [ ] Implement diff analysis.
 - [ ] Integrate Nelson for multi-LLM code review consensus.
 - [ ] Implement review feedback → Leonard rework loop.
-- [ ] Implement human review scoring (novelty, complexity, confidence).
+- [ ] Implement confidence scoring (novelty, complexity, risk, AI confidence).
 - [ ] Implement scoring via Nelson consensus.
 - [ ] Implement adaptive threshold learning.
 - [ ] Record human decisions for threshold calibration.
@@ -599,8 +599,8 @@ and validates documentation quality.
 | Message protocol | Strict Pydantic models (versioned) | Type-safe serialization/deserialization with validation at every boundary. |
 | Task sizing | Minimum file changes | Speeds up Leonard, simplifies Katherine's review, reduces merge conflicts. |
 | Parallelism | Julius-managed dependency graph | Smart parallelism -- not just "run everything at once" but respecting dependencies. |
-| Human review scoring | Nelson consensus (all 3 LLMs score it) | Same rigor as code review. Scores novelty, complexity, risk, AI confidence. |
-| Human review | Adaptive threshold learning | Starts conservative, learns the team's standards from human feedback. |
+| Confidence scoring | Nelson consensus (all LLMs score it) | Same rigor as code review. Scores novelty, complexity, risk, AI confidence. Low confidence → human review. |
+| Adaptive threshold | Threshold learning | Starts conservative, learns the team's standards from human feedback. |
 | GitHub auth | GitHub App + PAT fallback | GitHub App for orgs (auto-refresh), PAT for personal repos. |
 | Project config | `.opex.yaml` per repo | Clean interface between the agent system and any target codebase. |
 | Package management | uv workspaces | Fast, modern Python tooling. Workspace support for monorepo. |

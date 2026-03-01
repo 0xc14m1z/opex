@@ -7,7 +7,7 @@
 Katherine is the quality gate of the system. She reviews Leonard's implementation,
 decides whether the code meets standards, and determines whether a human needs to
 review the PR. Katherine uses Nelson (spec 16) for multi-LLM consensus on every
-review dimension, calculates a human review score, and adapts her threshold over
+review dimension, calculates a confidence score, and adapts her threshold over
 time based on human feedback.
 
 Katherine's decisions directly affect the system's autonomy: as she learns the
@@ -21,7 +21,7 @@ operate more independently.
 - Read the diff, the original task definition, and Sherlock's execution plan.
 - Use Nelson (spec 16) to get multi-LLM consensus on code quality across four dimensions: correctness, style, safety, simplicity.
 - If changes are needed: send structured feedback to Leonard for rework.
-- If approved: calculate a **human review score** via Nelson consensus.
+- If approved: calculate a **confidence score** via Nelson consensus.
 - Apply the adaptive threshold to decide whether human review is required.
 - Post structured review comments on the task PR (via Richelieu).
 - Enforce review principles from `.opex/principles/review/`.
@@ -57,7 +57,7 @@ operate more independently.
 - **Message type**: `review_result`
 - **Redis stream**: `pipeline:{id}:reviews`
 - **Payload variants**:
-  - `review_result:approved` -- code passes review, includes human review score.
+  - `review_result:approved` -- code passes review, includes confidence score.
   - `review_result:changes_requested` -- structured feedback for Leonard.
   - `review_result:escalated` -- review could not be completed, human needed.
 
@@ -110,14 +110,16 @@ review_goals:
 
 Based on Nelson's consensus:
 
-- **All dimensions pass**: Proceed to human review scoring (Step 4).
+- **All dimensions pass**: Proceed to confidence scoring (Step 4).
 - **Any dimension fails**: Generate structured feedback and publish `review_result:changes_requested`. Leonard receives the feedback and iterates.
 - **Nelson escalates (no consensus)**: Publish `review_result:escalated`.
 
-### Step 4: Human Review Scoring
+### Step 4: Confidence Scoring
 
-If the code passes review, Katherine calculates a **human review score** using
+If the code passes review, Katherine calculates a **confidence score** using
 Nelson consensus. This score determines whether the PR needs human review.
+A high score means high confidence (auto-approve); a low score means low
+confidence (flag for human review).
 
 #### Score Components
 
@@ -128,7 +130,7 @@ Nelson consensus. This score determines whether the PR needs human review.
 | AI Confidence       | Nelson          | Consensus confidence from the review loop           |
 | Historical Accuracy | PostgreSQL      | How often similar PRs needed human intervention    |
 
-Nelson review goals for human review scoring:
+Nelson review goals for confidence scoring:
 ```yaml
 review_goals:
   - "Rate the novelty of these changes (0-1): are new patterns introduced?"
@@ -139,17 +141,17 @@ review_goals:
 
 ### Step 5: Threshold Decision
 
-Compare the human review score against the adaptive threshold:
+Compare the confidence score against the adaptive threshold:
 
-- **Score >= threshold**: Flag the PR for human review. Apply `needs-human-review` label.
-- **Score < threshold**: Auto-approve. Apply `autonomous` label.
+- **Score >= threshold**: Auto-approve. Apply `autonomous` label. (High confidence.)
+- **Score < threshold**: Flag the PR for human review. Apply `needs-human-review` label. (Low confidence.)
 
-The threshold is configured in `.opex.yaml` (`review.human_review_threshold`,
+The threshold is configured in `.opex.yaml` (`review.confidence_threshold`,
 default: 0.7) and evolves via adaptive learning (see below).
 
 #### Always-flag paths
 
-Certain file paths always trigger human review regardless of score, configured in
+Certain file paths always trigger human review regardless of confidence, configured in
 `.opex.yaml`:
 
 ```yaml
@@ -162,7 +164,7 @@ review:
 
 ### Step 6: Publish Result
 
-- Publish `review_result:approved` with the human review score and threshold decision.
+- Publish `review_result:approved` with the confidence score and threshold decision.
 - The orchestrator then tells Richelieu to merge (if auto-approved) or waits for human review.
 
 ---
@@ -200,7 +202,7 @@ based on the team's specific patterns and risk tolerance.
 ## Interaction with Other Agents
 
 - **Leonard (spec 20-leonard)**: Katherine reviews Leonard's code. If changes are needed, Katherine publishes structured feedback. Leonard receives the feedback and iterates. This loop continues until Katherine approves or escalates.
-- **Nelson (spec 16)**: Katherine uses Nelson for both the code review consensus and the human review scoring consensus. Nelson is Katherine's primary decision-making tool.
+- **Nelson (spec 16)**: Katherine uses Nelson for both the code review consensus and the confidence scoring consensus. Nelson is Katherine's primary decision-making tool.
 - **Richelieu (spec 18)**: Katherine posts review comments on the task PR via the orchestrator (which dispatches to Richelieu). After approval, the orchestrator tells Richelieu to merge.
 - **Orchestrator (spec 13-orchestrator)**: The orchestrator spawns Katherine, consumes review results, and orchestrates the rework loop or merge.
 - **Sherlock (spec 19)**: Katherine reads Sherlock's execution plan to understand what was expected and verify the implementation matches.
@@ -231,7 +233,7 @@ When Katherine's reviews align with human reviews:
 <!-- Katherine's system prompt should establish her role as a thorough
      code reviewer, emphasize the four review dimensions (correctness,
      style, safety, simplicity), instruct her to provide actionable
-     feedback when requesting changes, and stress that the human review
+     feedback when requesting changes, and stress that the confidence
      score must be calculated honestly (not biased toward auto-approve). -->
 
 ---
@@ -245,7 +247,7 @@ Expected tools:
 - **Diff reader**: Read the git diff for the task branch.
 - **File reader**: Read source files in the repo and worktree for context.
 - **Complexity analysis**: Calculate cyclomatic complexity delta, count files changed.
-- **Nelson request**: Submit consensus requests for code review and human review scoring.
+- **Nelson request**: Submit consensus requests for code review and confidence scoring.
 - **Principles reader**: Read and filter review principles from `.opex/principles/review/`.
 - **Historical data query**: Query PostgreSQL for historical review accuracy data.
 - **Redis publish**: Publish `review_result` messages.
@@ -262,7 +264,7 @@ Expected tools:
 - **Rework loop limit**: If Leonard fails to address feedback after N rework
   iterations (tracked by the orchestrator), Katherine escalates to human.
 - **Diff too large**: If the diff exceeds a size threshold, Katherine flags for
-  human review regardless of score (large diffs are inherently risky).
+  human review regardless of confidence (large diffs are inherently risky).
 
 ---
 
@@ -282,7 +284,7 @@ Overridable via `.opex.yaml` `resources.katherine` section (see spec 12).
 ## Configuration
 
 - **`.opex.yaml`** (`review:` section):
-  - `human_review_threshold`: Score above which human review is required (default: 0.7).
+  - `confidence_threshold`: Confidence below which human review is required (default: 0.7).
   - `always_human_review`: File path patterns that always trigger human review.
 - **`.opex.yaml`** (`llm:` section): Model configuration for Nelson consensus calls.
 - **Environment variables**: `PIPELINE_ID`, `TASK_ID`, `OPENROUTER_API_KEY`, `DATABASE_URL`, `REDIS_URL`.
@@ -298,7 +300,7 @@ Overridable via `.opex.yaml` `resources.katherine` section (see spec 12).
   various review scenarios.
 - **Integration tests**: Use VCR cassettes (see spec 10) to record real LLM
   review calls. Test the full flow from diff input to `review_result` output.
-- **Scoring tests**: Test human review score calculation with known inputs.
+- **Scoring tests**: Test confidence score calculation with known inputs.
   Verify threshold behavior at boundaries (score exactly at threshold, just above,
   just below).
 - **Adaptive threshold tests**: Simulate sequences of human decisions and verify

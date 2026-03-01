@@ -121,15 +121,15 @@ git:
   auto_merge: false                       # Even if approved, wait for human merge
   conventional_commits: true              # Enforce conventional commit format
 
-# Human review configuration
+# Review confidence configuration
 review:
-  human_review_threshold: 0.7             # Nelson-calculated score above this → human
+  confidence_threshold: 0.7               # Confidence below this → human review required
   always_human_review:                    # Paths that always need human eyes
     - "migrations/"
     - "infrastructure/"
     - "*.sql"
     - "docker-compose*.yml"
-  never_auto_approve:                     # Even if score is low, flag these
+  never_auto_approve:                     # Even if confidence is high, flag these
     - "security-related changes"
     - "dependency updates"
 

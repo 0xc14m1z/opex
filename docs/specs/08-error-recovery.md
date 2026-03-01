@@ -77,7 +77,7 @@ Each agent defines its own checkpoints at natural boundaries:
 | `diff_analyzed` | Diff read and understood |
 | `consensus_requested` | Nelson review in progress |
 | `review_complete` | Review decision made |
-| `score_calculated` | Human review score computed |
+| `score_calculated` | Confidence score computed |
 
 ### Checkpoint Storage
 

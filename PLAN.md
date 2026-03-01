@@ -30,4 +30,4 @@ architecture diagram, tech stack, project structure, and implementation phases.
 | 18 | [18-richelieu.md](docs/specs/18-richelieu.md) | Richelieu: git operations, worktree management, PR creation, conflict resolution |
 | 19 | [19-sherlock.md](docs/specs/19-sherlock.md) | Sherlock: codebase inspection, execution plan generation |
 | 20 | [20-leonard.md](docs/specs/20-leonard.md) | Leonard: code implementation, test execution, validation, simplification |
-| 21 | [21-katherine.md](docs/specs/21-katherine.md) | Katherine: code review, human review scoring, adaptive threshold |
+| 21 | [21-katherine.md](docs/specs/21-katherine.md) | Katherine: code review, confidence scoring, adaptive threshold |

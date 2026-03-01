@@ -140,7 +140,7 @@ class ReviewResultPayload(BaseModel):
     task_id: str
     decision: Literal["approved", "changes_requested", "escalated"]
     feedback: list[ReviewComment]            # Line-level feedback
-    human_review_score: float                # 0.0 – 1.0
+    confidence_score: float                   # 0.0 – 1.0 (higher = more confident)
     needs_human_review: bool
     consensus_id: str                        # Nelson consensus that backed this review
 ```

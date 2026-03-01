@@ -297,7 +297,7 @@ When agents need human input, the TUI shows a notification banner:
 ```
 ┌─ ⚠ ATTENTION NEEDED ──────────────────────────────────────────────┐
 │                                                                    │
-│  1. Katherine flagged PR #42 for human review (score: 0.82)       │
+│  1. Katherine flagged PR #42 for human review (confidence: 0.38)  │
 │  2. Nelson couldn't reach consensus on database schema approach    │
 │  3. Task #7 needs human guidance (3 attempts failed)              │
 │                                                                    │
@@ -420,7 +420,7 @@ In addition to the TUI, the system provides visibility through GitHub:
 
 - **Issue labels**: Applied by agents to show task status (see spec 01).
 - **PR descriptions**: Include a summary of what agents did, which tasks are covered,
-  consensus decisions made, and the human review score.
+  consensus decisions made, and the confidence score.
 - **PR comments**: Katherine posts review findings as PR comments.
 - **Status checks**: Leonard reports test/lint results as GitHub status checks.
 

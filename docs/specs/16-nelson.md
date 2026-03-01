@@ -313,7 +313,7 @@ Nelson is a **service agent** -- it does not initiate work. It only responds to
 
 - **Julius**: Validates task decomposition quality and dependency graph correctness.
 - **Sherlock**: Resolves ambiguous implementation approaches when multiple strategies exist.
-- **Katherine**: Runs multi-LLM code review consensus (correctness, style, safety, simplicity) and calculates human review scores.
+- **Katherine**: Runs multi-LLM code review consensus (correctness, style, safety, simplicity) and calculates confidence scores.
 - **Leonard**: May request consensus on approach when stuck (rare).
 - **Richelieu**: May request consensus on conflict resolution strategy (rare).
 - **Human (via TUI/CLI)**: Direct queries for any question.
@@ -366,7 +366,7 @@ review_goals:
   - "Are there implicit dependencies not captured?"
 ```
 
-**Katherine (human review scoring)**:
+**Katherine (confidence scoring)**:
 ```yaml
 review_goals:
   - "Rate the novelty of these changes (0-1): are new patterns introduced?"

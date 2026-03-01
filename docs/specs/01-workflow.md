@@ -190,9 +190,9 @@ Every task PR goes through this review flow on GitHub:
 2. **If changes needed**: Katherine requests changes. Leonard pushes fixes
    to the task branch. Katherine re-reviews. The full conversation is visible
    on the PR.
-3. **Katherine calculates human review score** via Nelson consensus (see spec 16).
-4. **If score < threshold**: Katherine approves the PR.
-5. **If score >= threshold**: PR stays open, flagged for human review.
+3. **Katherine calculates a confidence score** via Nelson consensus (see spec 16).
+4. **If score >= threshold**: Katherine approves the PR (high confidence).
+5. **If score < threshold**: PR stays open, flagged for human review (low confidence).
    A `learning-mode` label is added if learning mode is active (see spec 03).
 6. **Human reviews** (if flagged): Approves, requests changes, or discusses.
    Human comments feed back into the principle system (see spec 03).

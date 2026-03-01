@@ -132,7 +132,7 @@ This allows the TUI to show the full trace of any operation.
 |-------------------------|-------|---------------------------------------|
 | `review_started`        | info  | `{task_id, files_in_diff}`            |
 | `review_completed`      | info  | `{task_id, decision, score}`          |
-| `human_review_flagged`  | info  | `{task_id, score, reasons}`           |
+| `low_confidence_flagged` | info  | `{task_id, confidence, reasons}`     |
 | `human_decision`        | info  | `{task_id, decision, feedback}`       |
 
 ### Budget
@@ -319,8 +319,8 @@ These services' logs are accessible via `docker logs <service>`.
 # All review decisions
 {service=~"katherine.*"} | json | event="review_completed"
 
-# Human review flags
-{service=~".*"} | json | event="human_review_flagged"
+# Low confidence flags
+{service=~".*"} | json | event="low_confidence_flagged"
 
 # Consensus escalations (could not reach agreement)
 {service=~"nelson.*"} | json | event="consensus_escalated"

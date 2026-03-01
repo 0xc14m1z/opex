@@ -97,9 +97,9 @@ Decomposition quality? Task graph? Scope?
 Does Richelieu merge via GitHub API (PR metadata, status checks) or local
 `git merge` + push (faster but bypasses checks)?
 
-**Issue 10 — Review score semantics.**
-"Human review score" — what does it represent? Confidence? Risk? What's the scale?
-Higher = more human review needed, but this should be explicit.
+**Issue 10 — Review score semantics.** ✅ RESOLVED
+Renamed to "confidence score" (0.0–1.0). Higher = more confident = auto-approve.
+Score < threshold → human review required. Threshold default: 0.7.
 
 **Issue 11 — Max review cycles.**
 Leonard implements → Katherine requests changes → loop. No limit specified. Should

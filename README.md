@@ -120,7 +120,7 @@ budget:
   hard_limit: 20.00
 
 review:
-  human_review_threshold: 0.7
+  confidence_threshold: 0.7
 ```
 
 ## Design Principles

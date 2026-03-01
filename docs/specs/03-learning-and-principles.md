@@ -264,7 +264,7 @@ flagging it for human review.
 1. **`.opex.yaml`** (repo owner sets the floor):
    ```yaml
    review:
-     human_review_threshold: 0.0    # Floor: system can never go below this
+     confidence_threshold: 0.0      # Floor: system can never go below this
    ```
 
 2. **PostgreSQL** (system learns the current effective threshold):
@@ -311,7 +311,7 @@ Each threshold change records the full reasoning chain: what human comments
 were made, what principles were involved, what the root cause analysis
 revealed, and what the decision was. This is inspectable via the TUI and API.
 
-### Score components (Katherine's human review decision)
+### Score components (Katherine's confidence scoring)
 
 | Signal              | Source          | Description                                        |
 |---------------------|----------------|----------------------------------------------------|
