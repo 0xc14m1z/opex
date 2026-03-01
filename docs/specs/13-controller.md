@@ -1,4 +1,6 @@
-# 13 — Pipeline Orchestrator (Controller)
+# 13 — Controller (Pipeline Orchestrator)
+
+> **Migrated from**: `docs/specs/13-orchestrator.md` (Overview, Design Principles, Project Structure, Core Components, Routing Table, Message Types, PostgreSQL Tables, Failure Scenarios, Configuration, Testing, Build Order) and `docs/specs/01-deployment.md` (Launcher Protocol, Logging for Ephemeral Agents, Secret Scoping, Controller Health & Recovery)
 
 ## Overview
 
@@ -85,7 +87,9 @@ class Router:
 
 ### 2. Launcher (`launcher.py`)
 
-Manages ephemeral agent containers via the Docker SDK (`docker` Python package).
+Manages ephemeral agent containers via the Launcher Protocol (defined below).
+The controller uses the Launcher to create, monitor, and clean up agent containers.
+See spec 05 for the Docker Compose infrastructure that these containers run on.
 
 ```python
 class Launcher:
@@ -108,18 +112,6 @@ class Launcher:
         ...
     async def remove(self, container_id: str) -> None: ...
 ```
-
-Container creation details:
-
-| Parameter         | Value                                                    |
-|-------------------|----------------------------------------------------------|
-| Image             | `ai-team-{agent}:latest` (built by `make build`)        |
-| Network           | `ai-team-net`                                            |
-| Volumes           | Same as `docker-compose.yml` definitions per agent       |
-| Environment       | `.env` + `PIPELINE_ID` + `TASK_ID` + agent-specific vars |
-| Name              | `ai-team-{agent}-{pipeline_id[:8]}-{task_id[:8]}`       |
-| Restart policy    | `no` (the controller handles retries)                    |
-| Labels            | `ai-team.agent`, `ai-team.pipeline`, `ai-team.task`     |
 
 ### 3. Watchdog (`watchdog.py`)
 
@@ -175,9 +167,191 @@ class StateTracker:
 
 ---
 
+## Launcher Protocol
+
+> **Migrated from**: `docs/specs/01-deployment.md` — Launcher Protocol section
+
+The controller's `Launcher` class is the key abstraction for container management.
+It has a pluggable backend to support different container runtimes.
+
+**This is the canonical definition.**
+
+```python
+class Launcher(Protocol):
+    """Interface for launching agent containers on any runtime."""
+
+    async def launch(
+        self,
+        agent: AgentName,
+        pipeline_id: str,
+        task_id: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> str:
+        """Launch an agent container. Returns container ID.
+
+        The Launcher is responsible for:
+        - Selecting the correct image (ai-team-{agent}:latest)
+        - Applying the agent's resource limits (defaults + .ai-team.yaml overrides)
+        - Filtering secrets via the agent's allowlist
+        - Configuring the Loki logging driver
+        - Connecting to the ai-team-net network
+        - Setting container labels for identification
+        """
+        ...
+
+    async def stop(self, container_id: str, timeout: int = 30) -> None:
+        """Send SIGTERM, wait up to timeout, then SIGKILL."""
+        ...
+
+    async def inspect(self, container_id: str) -> ContainerStatus:
+        """Get current container state (running, exited, etc.)."""
+        ...
+
+    async def wait(self, container_id: str) -> int:
+        """Block until container exits. Returns exit code."""
+        ...
+
+    async def remove(self, container_id: str) -> None:
+        """Remove container and its anonymous volumes."""
+        ...
+```
+
+### Container creation parameters
+
+| Parameter         | Value                                                        |
+|-------------------|--------------------------------------------------------------|
+| Image             | `ai-team-{agent}:latest` (built by `make build`)            |
+| Network           | `ai-team-net`                                                |
+| Volumes           | Per agent filesystem access rules (see spec 05 Volumes section) |
+| Environment       | Filtered secrets (see Secret Scoping below) + `PIPELINE_ID` + `TASK_ID` + agent-specific vars |
+| Name              | `ai-team-{agent}-{pipeline_id[:8]}-{task_id[:8]}`           |
+| Restart policy    | `no` (the controller handles retries)                        |
+| Labels            | `ai-team.agent={agent}`, `ai-team.pipeline={pipeline_id}`, `ai-team.task={task_id}` |
+| Resource limits   | Per-agent defaults merged with `.ai-team.yaml` overrides (see spec 05) |
+| Log config        | Loki logging driver (see Logging for Ephemeral Agents below) |
+
+### Launcher backends
+
+| Backend              | Runtime           | Use case                      |
+|----------------------|-------------------|-------------------------------|
+| `DockerLauncher`     | Docker SDK        | Local dev (single machine)    |
+| `KubernetesLauncher` | k8s Jobs API     | Production cluster            |
+| `ECSLauncher`        | ECS RunTask API   | AWS production                |
+
+The backend is selected via configuration. Agent images are pushed to a container
+registry (ECR, GCR, GHCR) and referenced by the launcher.
+
+---
+
+## Logging for Ephemeral Agents
+
+> **Migrated from**: `docs/specs/01-deployment.md` — Logging for Ephemeral Agents section
+
+Ephemeral containers spawned by the Launcher do **not** inherit Docker Compose's
+logging configuration. The Launcher must explicitly configure the Loki logging
+driver on each `container.run()` call.
+
+### Docker SDK logging configuration
+
+```python
+# In DockerLauncher.launch()
+log_config = docker.types.LogConfig(
+    type="loki",
+    config={
+        "loki-url": "http://loki:3100/loki/api/v1/push",
+        "loki-retries": "2",
+        "loki-batch-size": "400",
+        "labels": f"service={agent},pipeline={pipeline_id},task={task_id}",
+    },
+)
+
+container = client.containers.run(
+    image=f"ai-team-{agent}:{tag}",
+    log_config=log_config,
+    # ... other params
+)
+```
+
+### Label strategy
+
+Every ephemeral container's logs are tagged with:
+- `service` — the agent name (e.g., `leonard`, `nelson`)
+- `pipeline` — the pipeline ID
+- `task` — the task ID (empty for pipeline-level agents like Julius)
+
+This allows Grafana/LogQL queries like:
+```logql
+{service="leonard", pipeline="pipe-abc123"} |= "test failed"
+```
+
+---
+
+## Secret Scoping
+
+> **Migrated from**: `docs/specs/01-deployment.md` — Secret Scoping section
+
+Not all agents need all secrets. The Launcher filters environment variables
+based on a per-agent allowlist before spawning containers.
+
+### Default allowlists
+
+| Agent      | Env vars received                                               |
+|------------|----------------------------------------------------------------|
+| Nelson     | `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`             |
+| Julius     | `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`             |
+| Sherlock   | `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`             |
+| Leonard    | `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`             |
+| Katherine  | `OPENROUTER_API_KEY`, `REDIS_URL`, `DATABASE_URL`             |
+| Richelieu  | `GITHUB_PAT`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH`, `REDIS_URL`, `DATABASE_URL` |
+
+All agents also receive: `PIPELINE_ID`, `TASK_ID`, `LOG_LEVEL`.
+
+No agent receives secrets it doesn't need. In particular:
+- Only Richelieu gets GitHub credentials.
+- If an agent doesn't call LLMs directly (communicates with Nelson via Redis
+  instead), it can be removed from the `OPENROUTER_API_KEY` list.
+
+### `.ai-team.yaml` overrides
+
+The target repo owner can extend (but not reduce) the allowlists:
+
+```yaml
+# .ai-team.yaml
+secrets:
+  leonard:
+    additional:
+      - CUSTOM_API_KEY       # Leonard needs this for the target repo's test suite
+```
+
+### Implementation
+
+```python
+# In DockerLauncher
+AGENT_SECRET_ALLOWLISTS: dict[AgentName, list[str]] = {
+    "nelson": ["OPENROUTER_API_KEY", "REDIS_URL", "DATABASE_URL"],
+    "julius": ["OPENROUTER_API_KEY", "REDIS_URL", "DATABASE_URL"],
+    "sherlock": ["OPENROUTER_API_KEY", "REDIS_URL", "DATABASE_URL"],
+    "leonard": ["OPENROUTER_API_KEY", "REDIS_URL", "DATABASE_URL"],
+    "katherine": ["OPENROUTER_API_KEY", "REDIS_URL", "DATABASE_URL"],
+    "richelieu": [
+        "GITHUB_PAT", "GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY_PATH",
+        "REDIS_URL", "DATABASE_URL",
+    ],
+}
+
+ALWAYS_PASSED = ["PIPELINE_ID", "TASK_ID", "LOG_LEVEL"]
+
+def filter_env(self, agent: AgentName, full_env: dict) -> dict:
+    allowed = set(AGENT_SECRET_ALLOWLISTS[agent] + ALWAYS_PASSED)
+    allowed |= set(self.yaml_config.secrets.get(agent, {}).get("additional", []))
+    return {k: v for k, v in full_env.items() if k in allowed}
+```
+
+---
+
 ## Event → Container Routing Table
 
-The controller's full dispatch table. Every message type from spec 10 is accounted for.
+The controller's full dispatch table. Every message type from spec 04 is accounted for.
 
 ### Pipeline Events (controller acts on)
 
@@ -218,7 +392,7 @@ The controller's full dispatch table. Every message type from spec 10 is account
 ## New Message Types
 
 Six new message types introduced by the controller. All use the standard `MessageEnvelope`
-from spec 10.
+from spec 04.
 
 ### `pipeline_created`
 
@@ -304,7 +478,7 @@ class PipelineFailedPayload(BaseModel):
 
 ## New PostgreSQL Tables
 
-Two new tables added to the schema from spec 12.
+Two new tables added to the schema from spec 01.
 
 ### `pipelines`
 
@@ -360,276 +534,6 @@ class PipelineStatus(StrEnum):
     COMPLETED = "completed"              # PR opened
     FAILED = "failed"                    # Unrecoverable failure
     CANCELLED = "cancelled"              # Cancelled by human
-```
-
----
-
-## Docker Compose Changes
-
-The controller is the sole orchestrator. Only infrastructure services are defined in
-`docker-compose.yml`. **All agents are ephemeral** — spawned by the controller via
-the Launcher.
-
-### Always-running services (in `docker-compose.yml`)
-
-| Service      | Why always-running                                                |
-|--------------|-------------------------------------------------------------------|
-| `redis`      | Backbone — everything flows through it                            |
-| `postgres`   | Durable state store for pipelines, containers, and tasks          |
-| `loki`       | Log aggregation backend for all services                          |
-| `grafana`    | Observability dashboards (connects to Loki)                       |
-| `controller` | Orchestrates the entire pipeline lifecycle                        |
-
-### Ephemeral containers (launched by controller via Launcher)
-
-| Agent        | Launched when                          | Parallelism              | Exits when                          |
-|--------------|----------------------------------------|--------------------------|-------------------------------------|
-| `julius`     | `pipeline_created` event               | 1 per pipeline           | Publishes `decomposition_complete`  |
-| `sherlock`   | Task becomes `ready` (per task)        | Up to max_parallel       | Publishes `task_enriched`           |
-| `leonard`    | Task is enriched + worktree ready      | Up to max_parallel       | Publishes `implementation_complete` |
-| `katherine`  | Implementation complete (per task)     | Up to max_parallel       | Publishes `review_result`           |
-| `nelson`     | `consensus_request` on stream          | Up to max_parallel       | Publishes `consensus_response`      |
-| `richelieu`  | `git_request` on stream                | 1 per branch (serialized)| Publishes `git_response`            |
-
-### Updated `docker-compose.yml`
-
-```yaml
-# Only infrastructure + controller. No agents.
-
-x-logging: &default-logging
-  driver: loki
-  options:
-    loki-url: "http://localhost:3100/loki/api/v1/push"
-    loki-retries: "2"
-    loki-batch-size: "400"
-
-services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - ai-team-redis:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-    logging: *default-logging
-
-  postgres:
-    image: postgres:16-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: ai_team
-      POSTGRES_PASSWORD: ai_team
-      POSTGRES_DB: ai_team
-    volumes:
-      - ai-team-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ai_team"]
-      interval: 5s
-    logging: *default-logging
-
-  loki:
-    image: grafana/loki:2.9.0
-    ports:
-      - "3100:3100"
-    volumes:
-      - ai-team-loki:/loki
-    command: -config.file=/etc/loki/local-config.yaml
-
-  grafana:
-    image: grafana/grafana:10.2.0
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-    volumes:
-      - ai-team-grafana:/var/lib/grafana
-    depends_on:
-      - loki
-    logging: *default-logging
-
-  controller:
-    build: ./controller
-    env_file: .env
-    volumes:
-      - ai-team-logs:/data/logs
-      - /var/run/docker.sock:/var/run/docker.sock  # Docker SDK access
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    logging: *default-logging
-
-  # ALL agents (Nelson, Julius, Sherlock, Leonard, Katherine, Richelieu)
-  # are ephemeral containers launched by the controller on demand.
-  # See "Ephemeral containers" table above.
-
-volumes:
-  ai-team-redis:
-  ai-team-postgres:
-  ai-team-loki:
-  ai-team-grafana:
-  ai-team-repo:
-  ai-team-worktrees:
-  ai-team-logs:
-
-networks:
-  default:
-    name: ai-team-net
-```
-
-> **Docker socket access**: The controller mounts `/var/run/docker.sock` to manage
-> containers. This is a privileged operation — see spec 09 (security) for mitigations.
-> In multi-machine deployments, the Docker SDK is replaced by a Kubernetes or ECS
-> launcher backend (see spec 01 for the Launcher abstraction).
-
----
-
-## Failure Scenarios & Recovery
-
-### Scenario 1: Ephemeral agent crashes mid-task
-
-```
-Watchdog detects: no heartbeat for 90s OR container exited non-zero
-    │
-    ▼
-Check retry count for (agent, task_id)
-    │
-    ├── retries < 3 → Relaunch container from latest checkpoint
-    │                  (checkpoint data is passed via env/Redis)
-    │
-    └── retries >= 3 → Mark task as "needs_human"
-                        If task blocks others → mark dependents as "blocked"
-                        Emit status event for TUI
-```
-
-### Scenario 2: Nelson crashes mid-consensus
-
-```
-Watchdog detects: Nelson container exited non-zero OR heartbeat gap > 90s
-    │
-    ▼
-Same as Scenario 1: check retry count
-    │
-    ├── retries < 3 → Respawn Nelson with same consensus_request
-    │
-    └── retries >= 3 → Return consensus_response with status="error"
-                        The requesting agent handles the error
-                        (typically: escalate to human)
-```
-
-### Scenario 3: Richelieu crashes mid-operation
-
-```
-Watchdog detects: Richelieu container exited non-zero OR heartbeat gap > 90s
-    │
-    ▼
-Same as Scenario 1: check retry count
-    │
-    ├── retries < 3 → Respawn Richelieu with same git_request
-    │                  Git operations are idempotent (create branch
-    │                  that exists → no-op, etc.)
-    │
-    └── retries >= 3 → Mark task as "needs_human"
-                        Preserve branches for manual intervention
-```
-
-> Since all agents are now ephemeral, Nelson and Richelieu follow the exact same
-> retry/escalation logic as Julius, Sherlock, Leonard, and Katherine. Pending
-> requests queue up in Redis (durable) while the controller respawns.
-
-### Scenario 4: Merge conflict on branch_merged
-
-```
-Richelieu reports: git_response with success=false, conflicts=[...]
-    │
-    ▼
-Controller checks: is conflict auto-resolvable?
-    │
-    ├── YES → Richelieu retries with auto-resolve
-    │
-    └── NO → Mark task as "needs_human"
-             Preserve branches for manual resolution
-             Emit status event with conflicting files
-```
-
-### Scenario 5: Budget exceeded during pipeline
-
-```
-Cost tracking (spec 07) fires: hard limit reached for task
-    │
-    ▼
-Controller receives budget_exceeded event on status stream
-    │
-    ▼
-Stop the container running that task
-Mark task as "needs_human" with reason "budget_exceeded"
-Other tasks continue if they have independent budgets
-```
-
-### Scenario 6: All LLM providers down
-
-```
-Nelson reports: consensus_response with status="error", all providers failed
-    │
-    ▼
-Controller increments pipeline error counter
-    │
-    ├── < threshold → Wait, affected agents will retry via their own backoff
-    │
-    └── >= threshold → Pause pipeline (stop launching new containers)
-                        Alert human
-                        Resume when human confirms providers are back
-```
-
----
-
-## Configuration
-
-```python
-# controller/src/controller/config.py
-
-class ControllerConfig(BaseSettings):
-    """Controller configuration, loaded from environment."""
-
-    # Redis
-    redis_url: str = "redis://redis:6379"
-    consumer_group: str = "controller"
-    consumer_name: str = "controller-1"
-    stream_block_ms: int = 5000
-
-    # Parallelism (per agent type)
-    max_parallel_nelsons: int = 5
-    max_parallel_sherlocks: int = 5
-    max_parallel_leonards: int = 3
-    max_parallel_katherines: int = 3
-    max_parallel_richelieus: int = 3       # Serialized per-branch, parallel across branches
-
-    # Watchdog
-    watchdog_interval_seconds: int = 15
-    heartbeat_timeout_seconds: int = 90
-    container_deadline_minutes: int = 30   # Per-container max runtime
-
-    # Retries (per task per agent)
-    max_retries: int = 3
-
-    # Docker
-    docker_network: str = "ai-team-net"
-    image_prefix: str = "ai-team"          # Images: ai-team-julius, ai-team-sherlock, etc.
-    image_tag: str = "latest"
-
-    # Database
-    database_url: str = "postgresql://ai_team:ai_team@postgres:5432/ai_team"
-
-    # Pipeline error threshold (consecutive errors before pausing)
-    pipeline_error_threshold: int = 5
-
-    model_config = SettingsConfigDict(env_prefix="CONTROLLER_")
 ```
 
 ---
@@ -742,6 +646,257 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
 
 ---
 
+## Failure Scenarios & Recovery
+
+### Scenario 1: Ephemeral agent crashes mid-task
+
+```
+Watchdog detects: no heartbeat for 90s OR container exited non-zero
+    │
+    ▼
+Check retry count for (agent, task_id)
+    │
+    ├── retries < 3 → Relaunch container from latest checkpoint
+    │                  (checkpoint data is passed via env/Redis)
+    │
+    └── retries >= 3 → Mark task as "needs_human"
+                        If task blocks others → mark dependents as "blocked"
+                        Emit status event for TUI
+```
+
+### Scenario 2: Nelson crashes mid-consensus
+
+```
+Watchdog detects: Nelson container exited non-zero OR heartbeat gap > 90s
+    │
+    ▼
+Same as Scenario 1: check retry count
+    │
+    ├── retries < 3 → Respawn Nelson with same consensus_request
+    │
+    └── retries >= 3 → Return consensus_response with status="error"
+                        The requesting agent handles the error
+                        (typically: escalate to human)
+```
+
+### Scenario 3: Richelieu crashes mid-operation
+
+```
+Watchdog detects: Richelieu container exited non-zero OR heartbeat gap > 90s
+    │
+    ▼
+Same as Scenario 1: check retry count
+    │
+    ├── retries < 3 → Respawn Richelieu with same git_request
+    │                  Git operations are idempotent (create branch
+    │                  that exists → no-op, etc.)
+    │
+    └── retries >= 3 → Mark task as "needs_human"
+                        Preserve branches for manual intervention
+```
+
+> Since all agents are now ephemeral, Nelson and Richelieu follow the exact same
+> retry/escalation logic as Julius, Sherlock, Leonard, and Katherine. Pending
+> requests queue up in Redis (durable) while the controller respawns.
+
+### Scenario 4: Merge conflict on branch_merged
+
+```
+Richelieu reports: git_response with success=false, conflicts=[...]
+    │
+    ▼
+Controller checks: is conflict auto-resolvable?
+    │
+    ├── YES → Richelieu retries with auto-resolve
+    │
+    └── NO → Mark task as "needs_human"
+             Preserve branches for manual resolution
+             Emit status event with conflicting files
+```
+
+### Scenario 5: Budget exceeded during pipeline
+
+```
+Cost tracking (spec 07) fires: hard limit reached for task
+    │
+    ▼
+Controller receives budget_exceeded event on status stream
+    │
+    ▼
+Stop the container running that task
+Mark task as "needs_human" with reason "budget_exceeded"
+Other tasks continue if they have independent budgets
+```
+
+### Scenario 6: All LLM providers down
+
+```
+Nelson reports: consensus_response with status="error", all providers failed
+    │
+    ▼
+Controller increments pipeline error counter
+    │
+    ├── < threshold → Wait, affected agents will retry via their own backoff
+    │
+    └── >= threshold → Pause pipeline (stop launching new containers)
+                        Alert human
+                        Resume when human confirms providers are back
+```
+
+---
+
+## Controller Health & Recovery
+
+> **Migrated from**: `docs/specs/01-deployment.md` — Controller Health & Recovery section
+
+### Heartbeat
+
+The controller writes a heartbeat to Redis every 10 seconds:
+
+```python
+async def heartbeat_loop(redis: Redis) -> None:
+    while True:
+        await redis.set("controller:heartbeat", str(time.time()), ex=30)
+        await asyncio.sleep(10)
+```
+
+Docker Compose's health check verifies this key exists. If the controller hangs
+(event loop frozen), the heartbeat expires after 30 seconds, Docker marks the
+container unhealthy, and `restart: unless-stopped` triggers a restart.
+
+### Crash recovery
+
+The architecture provides crash recovery through existing infrastructure:
+
+1. **Redis Streams + XACK**: Messages read but not acknowledged remain in the
+   Pending Entries List (PEL). On restart, `XREADGROUP` automatically returns
+   unacknowledged messages. No event is ever lost.
+
+2. **PostgreSQL state**: Pipeline and container state survives controller
+   restarts. The controller reads its last known state from PostgreSQL on startup.
+
+3. **Docker labels**: All agent containers are labeled with `ai-team.*` labels.
+   The controller can discover running containers via Docker API queries.
+
+### Handler idempotency
+
+Since events may be re-processed after a crash, **all event handlers must be
+idempotent**:
+
+| Handler                 | Idempotency rule                                              |
+|-------------------------|---------------------------------------------------------------|
+| `launch_agent`          | Check if agent already running for (pipeline, task) before launching |
+| `update_pipeline_status`| Conditional update: `WHERE status = {expected_current_status}` |
+| `open_pr`               | Check if PR already exists for the branch before creating     |
+| `merge_branch`          | Check if branch is already merged before merging              |
+| `track_container`       | Upsert by container_id (INSERT ON CONFLICT UPDATE)            |
+
+### Startup reconciliation
+
+On startup, the controller reconciles its state before entering the event loop:
+
+```
+1. Connect to PostgreSQL, load pipeline and container state
+2. List Docker containers with ai-team.* labels
+3. For each container found:
+   a. In DB + running     → adopt (update last_heartbeat timestamp)
+   b. In DB + stopped     → check exit code, process result if not already processed
+   c. Not in DB + running → stop and remove (orphan from previous crash)
+4. Process pending Redis entries (automatic via XREADGROUP with PEL)
+5. For PAUSED pipelines: check which tasks were interrupted, resume from checkpoint
+6. Start normal event loop + heartbeat loop
+```
+
+### Graceful SIGTERM (nice-to-have)
+
+On `make down` or intentional shutdown:
+1. Stop reading new events from Redis
+2. Wait for current handler to finish
+3. Exit cleanly
+
+This is an optimization — the system handles hard crashes correctly via the
+mechanisms above. Graceful shutdown simply avoids wasting in-flight agent work.
+
+---
+
+## Configuration
+
+```python
+# controller/src/controller/config.py
+
+class ControllerConfig(BaseSettings):
+    """Controller configuration, loaded from environment."""
+
+    # Redis
+    redis_url: str = "redis://redis:6379"
+    consumer_group: str = "controller"
+    consumer_name: str = "controller-1"
+    stream_block_ms: int = 5000
+
+    # Parallelism (per agent type)
+    max_parallel_nelsons: int = 5
+    max_parallel_sherlocks: int = 5
+    max_parallel_leonards: int = 3
+    max_parallel_katherines: int = 3
+    max_parallel_richelieus: int = 3       # Serialized per-branch, parallel across branches
+
+    # Watchdog
+    watchdog_interval_seconds: int = 15
+    heartbeat_timeout_seconds: int = 90
+    container_deadline_minutes: int = 30   # Per-container max runtime
+
+    # Retries (per task per agent)
+    max_retries: int = 3
+
+    # Docker
+    docker_network: str = "ai-team-net"
+    image_prefix: str = "ai-team"          # Images: ai-team-julius, ai-team-sherlock, etc.
+    image_tag: str = "latest"
+
+    # Database
+    database_url: str = "postgresql://ai_team:ai_team@postgres:5432/ai_team"
+
+    # Pipeline error threshold (consecutive errors before pausing)
+    pipeline_error_threshold: int = 5
+
+    model_config = SettingsConfigDict(env_prefix="CONTROLLER_")
+```
+
+---
+
+## Docker Compose Changes
+
+The controller is the sole orchestrator. Only infrastructure services are defined in
+`docker-compose.yml` (see spec 05). **All agents are ephemeral** — spawned by the
+controller via the Launcher.
+
+### Always-running services (in `docker-compose.yml`)
+
+| Service      | Why always-running                                                |
+|--------------|-------------------------------------------------------------------|
+| `redis`      | Backbone — everything flows through it                            |
+| `postgres`   | Durable state store for pipelines, containers, and tasks          |
+| `loki`       | Log aggregation backend for all services                          |
+| `grafana`    | Observability dashboards (connects to Loki)                       |
+| `controller` | Orchestrates the entire pipeline lifecycle                        |
+
+### Ephemeral containers (launched by controller via Launcher)
+
+| Agent        | Launched when                          | Parallelism              | Exits when                          |
+|--------------|----------------------------------------|--------------------------|-------------------------------------|
+| `julius`     | `pipeline_created` event               | 1 per pipeline           | Publishes `decomposition_complete`  |
+| `sherlock`   | Task becomes `ready` (per task)        | Up to max_parallel       | Publishes `task_enriched`           |
+| `leonard`    | Task is enriched + worktree ready      | Up to max_parallel       | Publishes `implementation_complete` |
+| `katherine`  | Implementation complete (per task)     | Up to max_parallel       | Publishes `review_result`           |
+| `nelson`     | `consensus_request` on stream          | Up to max_parallel       | Publishes `consensus_response`      |
+| `richelieu`  | `git_request` on stream                | 1 per branch (serialized)| Publishes `git_response`            |
+
+> **Docker socket access**: The controller connects to the Docker Socket Proxy
+> (see spec 05) to manage containers. In multi-machine deployments, the Docker
+> SDK is replaced by a Kubernetes or ECS launcher backend (see Launcher Protocol above).
+
+---
+
 ## Testing Approach
 
 ### Unit Tests
@@ -766,7 +921,7 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
 ### E2E Test
 
 One end-to-end test with real containers (but mocked LLM responses via VCR cassettes
-from spec 11):
+from spec 10):
 
 1. Submit a plan with 3 tasks (2 parallel + 1 dependent).
 2. Verify Julius decomposes correctly.
@@ -789,7 +944,7 @@ agents will eventually produce, but can be unit-tested with mock messages from d
 | Step | Component                                         | Depends on                     |
 |------|---------------------------------------------------|--------------------------------|
 | 1.1  | `controller/config.py`                            | —                              |
-| 1.2  | `controller/state.py` + migrations                | PostgreSQL schema (spec 12)    |
+| 1.2  | `controller/state.py` + migrations                | PostgreSQL schema (spec 01)    |
 | 1.3  | `controller/launcher.py`                          | Docker SDK                     |
 | 1.4  | `controller/watchdog.py`                          | Heartbeat model (spec 08)      |
 | 1.5  | `controller/router.py` — full dispatch table      | 1.2–1.4                        |
@@ -814,7 +969,8 @@ controller's existing routing table.
 
 | Spec | Relationship                                                                |
 |------|-----------------------------------------------------------------------------|
-| 01   | Controller replaces the implicit orchestration. Updates Docker Compose layout (only infra + controller always-running; all agents are ephemeral). Launcher abstraction enables multi-machine scaling. |
-| 08   | Controller implements the watchdog described in 08 (previously "part of Richelieu or a dedicated sidecar"). Checkpoint/retry logic is per-agent; the controller manages the retry counter and relaunch decision. |
-| 10   | Controller consumes all message types from 10. Adds 6 new types. The routing table is the definitive "who reacts to what" reference. |
-| 12   | Adds `PipelineStatus` enum, `PipelineCreatedPayload` and 5 other payload models to `models/messages.py`. Adds `pipelines` and `active_containers` tables to the PostgreSQL schema. |
+| 05   | Infrastructure spec defines Docker Compose layout, volumes, networking, image builds, resource limits. The controller runs on top of this infrastructure. |
+| 14   | API server provides the external interface; controller handles internal orchestration. |
+| 15   | TUI consumes pipeline events that the controller publishes. |
+| 04   | Controller consumes all message types from spec 04. Adds 6 new types. The routing table is the definitive "who reacts to what" reference. |
+| 01   | Adds `PipelineStatus` enum, `PipelineCreatedPayload` and 5 other payload models to `models/messages.py`. Adds `pipelines` and `active_containers` tables to the PostgreSQL schema. |

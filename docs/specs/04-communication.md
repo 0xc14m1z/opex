@@ -1,4 +1,8 @@
-# 10 — Communication Protocol
+# 04 — Communication Protocol
+
+> **Migrated from**: `docs/specs/10-communication.md` (all content preserved)
+
+---
 
 ## Overview
 
@@ -42,8 +46,8 @@ calls. This gives us a single place to monitor, replay, and debug all agent inte
 {scope}:{identifier}:{channel}
 ```
 
-- **Pipeline-scoped**: `pipeline:pipe-7:tasks` — messages for a specific pipeline run.
-- **System-scoped**: `logs`, `costs`, `status` — system-wide streams.
+- **Pipeline-scoped**: `pipeline:pipe-7:tasks` -- messages for a specific pipeline run.
+- **System-scoped**: `logs`, `costs`, `status` -- system-wide streams.
 
 ## Consumer Groups
 
@@ -83,7 +87,7 @@ class MessageEnvelope(BaseModel):
 
 ### Pipeline Messages
 
-#### `task_created` — Julius → task stream
+#### `task_created` -- Julius → task stream
 ```python
 class TaskCreatedPayload(BaseModel):
     task_id: str
@@ -95,7 +99,7 @@ class TaskCreatedPayload(BaseModel):
     acceptance_criteria: list[str]
 ```
 
-#### `task_enriched` — Sherlock → enriched stream
+#### `task_enriched` -- Sherlock → enriched stream
 ```python
 class TaskEnrichedPayload(BaseModel):
     task_id: str
@@ -107,7 +111,7 @@ class TaskEnrichedPayload(BaseModel):
     guidelines_applicable: list[str]
 ```
 
-#### `implementation_complete` — Leonard → review stream
+#### `implementation_complete` -- Leonard → review stream
 ```python
 class ImplementationCompletePayload(BaseModel):
     task_id: str
@@ -120,7 +124,7 @@ class ImplementationCompletePayload(BaseModel):
     attempt_number: int
 ```
 
-#### `review_result` — Katherine → appropriate stream
+#### `review_result` -- Katherine → appropriate stream
 ```python
 class ReviewResultPayload(BaseModel):
     task_id: str
@@ -131,7 +135,7 @@ class ReviewResultPayload(BaseModel):
     consensus_id: str                        # Nelson consensus that backed this review
 ```
 
-#### `rework_requested` — Katherine → Leonard (via review stream)
+#### `rework_requested` -- Katherine → Leonard (via review stream)
 ```python
 class ReworkRequestPayload(BaseModel):
     task_id: str
@@ -142,7 +146,7 @@ class ReworkRequestPayload(BaseModel):
 
 ### Git Operations
 
-#### `git_request` — Any agent → Richelieu
+#### `git_request` -- Any agent → Richelieu
 ```python
 class GitRequestPayload(BaseModel):
     operation: Literal[
@@ -158,7 +162,7 @@ class GitRequestPayload(BaseModel):
     reply_to: str                            # Stream for Richelieu's response
 ```
 
-#### `git_response` — Richelieu → requester
+#### `git_response` -- Richelieu → requester
 ```python
 class GitResponsePayload(BaseModel):
     operation: str
@@ -169,9 +173,9 @@ class GitResponsePayload(BaseModel):
 
 ### Consensus Messages
 
-#### `consensus_request` — Any agent → Nelson
+#### `consensus_request` -- Any agent → Nelson
 ```python
-# See 04-consensus.md for full ConsensusRequest model
+# See spec 16 for full ConsensusRequest model
 class ConsensusRequestPayload(BaseModel):
     request_id: str
     requester: str
@@ -183,9 +187,9 @@ class ConsensusRequestPayload(BaseModel):
     priority: Literal["low", "normal", "high"] = "normal"
 ```
 
-#### `consensus_response` — Nelson → requester
+#### `consensus_response` -- Nelson → requester
 ```python
-# See 04-consensus.md for full ConsensusResponse model
+# See spec 16 for full ConsensusResponse model
 class ConsensusResponsePayload(BaseModel):
     request_id: str
     status: Literal["agreed", "majority", "weighted", "escalated", "error"]
@@ -198,7 +202,7 @@ class ConsensusResponsePayload(BaseModel):
 
 ### Human Input
 
-#### `human_decision` — TUI → agents
+#### `human_decision` -- TUI → agents
 ```python
 class HumanDecisionPayload(BaseModel):
     decision_type: Literal[
@@ -216,6 +220,8 @@ class HumanDecisionPayload(BaseModel):
 ```
 
 ## Message Flow: Complete Task Lifecycle
+
+For the full 20-step end-to-end pipeline flow, see spec 02.
 
 ```
 1. Julius publishes to `pipeline:X:tasks`:
@@ -286,4 +292,4 @@ If an agent can't keep up with incoming messages:
 - Redis Streams accumulate (they're persistent).
 - The TUI shows stream depth metrics.
 - If a stream exceeds a configurable depth (e.g., 1000 messages), an alert fires.
-- No messages are dropped — the system slows down rather than losing work.
+- No messages are dropped -- the system slows down rather than losing work.

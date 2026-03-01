@@ -1,4 +1,6 @@
-# 05 — Development Rules
+# 11 — Development Standards
+
+> **Migrated from**: `docs/specs/05-dev-rules.md`
 
 ## Overview
 
@@ -82,6 +84,8 @@ addopts = "--cov=core --cov=agents --cov-report=term-missing --cov-fail-under=90
 - **VCR cassettes**: LLM API calls are recorded on first run and replayed
   deterministically on subsequent runs via `vcrpy` / `pytest-recording`.
 - **CI**: Runs with `--vcr-record=none` (replay only, no real API calls).
+
+See spec 10 for the full testing strategy.
 
 ## Coding Conventions
 
@@ -202,3 +206,11 @@ jobs:
 - CI must pass before merge.
 - Dog-fooding (Phase 8+): ai-team reviews its own PRs through the standard
   agent pipeline. Human still has final say.
+
+---
+
+## Cross-References
+
+- **Spec 05** (Infrastructure): Docker Compose config, image build strategy.
+- **Spec 18** (Security): `uv audit` for dependency vulnerability scanning.
+- **Spec 19** (Testing): Full testing strategy, coverage enforcement, CI pipeline details.

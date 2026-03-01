@@ -1,5 +1,7 @@
 # 07 — Cost Tracking
 
+> **Migrated from**: `docs/specs/07-cost-tracking.md`
+
 ## Overview
 
 Every LLM call in the system has a cost entry linked to the agent, task, consensus round,
@@ -200,7 +202,7 @@ GROUP BY type;
 
 ## TUI Cost Integration
 
-The TUI displays cost data in real-time (see 03-task-visibility.md for mockups):
+The TUI displays cost data in real-time (see spec 15 for TUI mockups):
 
 - **Pipeline overview**: Running total for current pipeline.
 - **Task list**: Cost per task, colored by budget status (green/yellow/red).
@@ -231,3 +233,14 @@ Once enough data is collected, the system can suggest optimizations:
   file contents across tasks in the same pipeline."
 - "GPT-4o is 30% cheaper than Claude for consensus cross-review with similar
   accuracy. Consider using it as the primary review model."
+
+---
+
+## Cross-References
+
+- **Spec 05** (Infrastructure): Docker Compose config, `.env` for `DAILY_BUDGET_HARD`.
+- **Spec 06** (Controller): Budget enforcement halts pipeline if daily limit exceeded.
+- **Spec 08** (TUI): Real-time cost display, budget alerts.
+- **Spec 15** (Observability): `llm_call_completed`, `budget_warning`, `budget_exceeded` events.
+- **Spec 17** (Error Recovery): Budget exceeded is a fatal error that escalates to human.
+- **Spec 21** (Repo Connection): `.ai-team.yaml` `budget:` section for per-project limits.

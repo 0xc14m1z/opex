@@ -1,4 +1,8 @@
-# 12 — Data Models
+# 01 — Data Models
+
+> **Migrated from**: `docs/specs/12-data-models.md` (all content) with additions from `docs/specs/01-deployment.md` (principles, learning_conversations, review_threshold_history tables, and pipelines table extensions)
+
+---
 
 ## Overview
 
@@ -462,7 +466,7 @@ class Checkpoint(BaseModel):
 
 These payload models are used by the pipeline controller (spec 13) and are the
 canonical definitions for controller lifecycle events. All use the standard
-`MessageEnvelope` from spec 10.
+`MessageEnvelope` from spec 04.
 
 ```python
 # models/messages.py (controller payloads)
@@ -543,6 +547,8 @@ CREATE TABLE pipelines (
     tasks_completed INTEGER DEFAULT 0,
     pr_url TEXT,                             -- Set when PR is opened
     total_cost NUMERIC(10,4) DEFAULT 0.0,
+    learning_mode BOOLEAN DEFAULT true,      -- Whether learning mode is active
+    learning_disabled_at_task TEXT,           -- Task ID when learning was turned off
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     started_at TIMESTAMPTZ,                  -- When Julius was launched
     completed_at TIMESTAMPTZ,
@@ -654,6 +660,50 @@ CREATE TABLE active_containers (
     exited_at TIMESTAMPTZ
 );
 
+-- Principles (distilled learnings from human feedback, see spec 03)
+CREATE TABLE principles (
+    id TEXT PRIMARY KEY,                     -- "impl-001", "rev-003"
+    type TEXT NOT NULL,                      -- "implementation" or "review"
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,                   -- Full markdown content
+    agent TEXT NOT NULL,                     -- Target agent
+    learned_from_pr TEXT,                    -- GitHub PR URL
+    pipeline_id TEXT,
+    task_id TEXT,
+    confidence REAL DEFAULT 0.5,             -- 0.0 to 1.0
+    times_applied INTEGER DEFAULT 0,         -- How many times used in subsequent tasks
+    times_violated INTEGER DEFAULT 0,        -- How many times a subsequent task broke this
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Learning conversations (discussion-based learning records, see spec 03)
+CREATE TABLE learning_conversations (
+    id TEXT PRIMARY KEY,
+    pipeline_id TEXT NOT NULL REFERENCES pipelines(id),
+    task_id TEXT NOT NULL,
+    replay_number INTEGER NOT NULL,          -- Which replay iteration
+    messages JSONB NOT NULL,                 -- Full conversation thread
+    principles_extracted TEXT[],             -- IDs of principles created/updated
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Review threshold history (adaptive learning audit trail, see spec 03)
+CREATE TABLE review_threshold_history (
+    id TEXT PRIMARY KEY,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    previous_threshold REAL NOT NULL,
+    new_threshold REAL NOT NULL,
+    reason TEXT NOT NULL,                    -- Human-readable explanation
+    principles_learned TEXT[],               -- Principle IDs that drove this change
+    human_approvals INTEGER NOT NULL,        -- Count since last change
+    human_rejections INTEGER NOT NULL,       -- Count since last change
+    details JSONB NOT NULL                   -- Full reasoning chain:
+                                             --   - What comments were made
+                                             --   - What principles were extracted
+                                             --   - What insights emerged
+);
+
 -- Indexes
 CREATE INDEX idx_tasks_pipeline ON tasks(pipeline_id);
 CREATE INDEX idx_tasks_status ON tasks(status);
@@ -665,4 +715,9 @@ CREATE INDEX idx_human_decisions_task ON human_decisions(task_id);
 CREATE INDEX idx_audit_timestamp ON audit_log(timestamp);
 CREATE INDEX idx_containers_pipeline ON active_containers(pipeline_id);
 CREATE INDEX idx_containers_status ON active_containers(status);
+CREATE INDEX idx_principles_type ON principles(type);
+CREATE INDEX idx_principles_agent ON principles(agent);
+CREATE INDEX idx_learning_conv_pipeline ON learning_conversations(pipeline_id);
+CREATE INDEX idx_learning_conv_task ON learning_conversations(task_id);
+CREATE INDEX idx_threshold_history_timestamp ON review_threshold_history(timestamp);
 ```

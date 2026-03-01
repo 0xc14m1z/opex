@@ -1,10 +1,17 @@
 # 08 — Error Recovery
 
+> **Migrated from**: `docs/specs/08-error-recovery.md`
+
 ## Overview
 
 Agents crash. LLM APIs go down. Tests flake. The system is designed to handle all of
 these gracefully: checkpoint progress, restart from where it left off, retry up to 3
 times, alert the human, and escalate on total failure.
+
+> **Note**: The controller (spec 13) implements handler idempotency and startup
+> reconciliation to ensure that events are never lost or double-processed after a
+> crash. All event handlers in the controller must be idempotent — see spec 13 for
+> the idempotency rules table and startup reconciliation sequence.
 
 ---
 
@@ -280,3 +287,20 @@ All agent operations should be idempotent where possible:
 - Publishing a task to Redis → use message IDs to deduplicate.
 
 This prevents double-execution issues when resuming from checkpoints.
+
+> **Note**: The controller itself also enforces idempotency in its event handlers.
+> See spec 13 for the full handler idempotency table (e.g., `launch_agent` checks
+> if agent already running, `open_pr` checks if PR already exists, etc.) and the
+> startup reconciliation sequence that reconciles Docker container state with
+> PostgreSQL state after a controller crash.
+
+---
+
+## Cross-References
+
+- **Spec 05** (Infrastructure): Resource limits prevent runaway containers.
+- **Spec 06** (Controller): Watchdog monitors heartbeats, handler idempotency, startup reconciliation, retry orchestration.
+- **Spec 08** (TUI): Displays error banners, escalation alerts, blocked task indicators.
+- **Spec 15** (Observability): Error events, checkpoint events, retry events in log stream.
+- **Spec 16** (Cost Tracking): Budget exceeded is a fatal error category.
+- **Spec 18** (Security): Container hardening limits blast radius of agent crashes.

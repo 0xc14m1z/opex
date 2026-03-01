@@ -1,4 +1,6 @@
-# 02 — Repo Connection
+# 12 — Repo Connection & Configuration
+
+> **Migrated from**: `docs/specs/02-repo-connection.md`, with additions from `docs/specs/01-deployment.md`
 
 ## Overview
 
@@ -201,7 +203,61 @@ llm:
   overrides:                                      # Optional: per-agent model override
     leonard: anthropic/claude-sonnet-4
     sherlock: google/gemini-2.0-flash
+
+# Resource overrides per agent (defaults in spec 05)
+resources:
+  leonard:
+    cpu_limit: 4.0
+    memory_limit: 4G
+  sherlock:
+    memory_limit: 2G
+
+# Secret allowlist extensions per agent (see spec 09)
+secrets:
+  leonard:
+    additional:
+      - CUSTOM_API_KEY       # Leonard needs this for the target repo's test suite
+
+# Learning mode configuration
+learning:
+  enabled: true              # Default for new pipelines
+  auto_disable_after: null   # Or: 5 (disable after N tasks)
 ```
+
+## Repo Volume Lifecycle
+
+> **Migrated from**: `docs/specs/01-deployment.md` (Branching Model & Repo Lifecycle section)
+
+The target repo is cloned into a persistent Docker volume that survives across
+pipelines, providing a warm cache for subsequent operations.
+
+### Lifecycle
+
+1. **`make connect REPO=<url>`** — Clones the target repo into the `ai-team-repo`
+   volume. This is a one-time setup operation. The clone persists across pipelines
+   (warm cache).
+
+2. **Pipeline starts** — Richelieu runs `git fetch origin` to pull the latest
+   changes, then creates a feature branch from `origin/{default_branch}`. The
+   feature branch is pushed to GitHub.
+
+3. **Between pipelines** — The repo volume persists. The next pipeline starts
+   with `git fetch`, so it has the latest upstream state. No re-clone needed.
+
+4. **Disconnection** (`make disconnect REPO=<url>`) — Removes the workspace
+   volume, deregisters webhooks, and cleans up PostgreSQL connection records.
+
+### Volume details
+
+The repo volume is mounted at `/workspace` inside all agent containers:
+
+| Volume               | Mount Path    | Access                                        |
+|----------------------|---------------|-----------------------------------------------|
+| `ai-team-repo`      | `/workspace`  | All agents (RO), Richelieu + Leonard (RW)     |
+| `ai-team-worktrees` | `/workspace/.worktrees` | Leonard (own worktree RW), Richelieu (RW), others (RO) |
+
+See spec 05 for the full Docker Compose volume definitions and filesystem
+access rules.
 
 ## Repo Sync
 
@@ -232,3 +288,13 @@ make disconnect REPO=https://github.com/org/my-app
 - Deregisters webhooks.
 - Cleans up PostgreSQL connection records.
 - Stops any in-progress work on that repo (with confirmation).
+
+---
+
+## Cross-References
+
+- **Spec 05** (Infrastructure): Docker Compose volumes, filesystem access rules, `make connect` target.
+- **Spec 06** (Controller): Pipeline creation triggers Richelieu for `git fetch`.
+- **Spec 16** (Cost Tracking): `.ai-team.yaml` `budget:` section for per-project limits.
+- **Spec 18** (Security): `.ai-team.yaml` `secrets:` section, GitHub App and PAT credential management.
+- **Spec 19** (Testing): `.ai-team.yaml` config parsing tests, test repo fixture.

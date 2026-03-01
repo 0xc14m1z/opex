@@ -1,4 +1,6 @@
-# 11 — Testing Strategy
+# 10 — Testing
+
+> **Migrated from**: `docs/specs/11-testing.md`
 
 ## Overview
 
@@ -482,3 +484,14 @@ For clarity, here is the explicit list of things we refuse to mock:
 
 The only abstraction layer is VCR, and even that is just HTTP-level record/replay of
 real interactions — not a mock.
+
+---
+
+## Cross-References
+
+- **Spec 05** (Infrastructure): Docker Compose configuration for test infrastructure.
+- **Spec 15** (Observability): Log events used in assertions and test verification.
+- **Spec 16** (Cost Tracking): Cost calculation tests, budget enforcement tests.
+- **Spec 17** (Error Recovery): Checkpoint save/resume tests, retry logic tests.
+- **Spec 20** (Development Standards): Coverage targets (90%+), CI pipeline configuration.
+- **Spec 21** (Repo Connection): `.ai-team.yaml` parsing tests, test repo fixture.
