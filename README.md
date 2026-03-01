@@ -4,8 +4,8 @@
 
 Opex decomposes a feature plan into parallelizable tasks, implements them through
 ephemeral AI agents, reviews every output via multi-LLM consensus, and learns
-from human feedback to decide when to escalate. Claude, GPT-4o, and Gemini
-cross-review each other until they converge — no single model is trusted alone.
+from human feedback to decide when to escalate. Multiple LLMs cross-review
+each other until they converge — no single model is trusted alone.
 
 ---
 
@@ -20,7 +20,7 @@ Plan → Decompose → Enrich → Implement → Review → PR
 3. **Richelieu** creates a feature branch and per-task worktrees.
 4. **Sherlock** inspects the codebase for each task and produces a file-level execution plan.
 5. **Leonard** implements, tests, and validates — multiple instances run in parallel.
-6. **Katherine** reviews via Nelson consensus (3 LLMs cross-reviewing). If rework is needed, Leonard iterates.
+6. **Katherine** reviews via Nelson consensus (multi-LLM cross-review). If rework is needed, Leonard iterates.
 7. **Richelieu** merges task branches and opens a feature PR targeting `main`.
 
 Every failure escalates to a human with full context — the system never silently gives up.
@@ -30,7 +30,7 @@ Every failure escalates to a human with full context — the system never silent
 | Agent | Role | Description |
 |---|---|---|
 | **Orchestrator** | Pipeline driver | Deterministic event router. Spawns and monitors all agents. No LLM. |
-| **Nelson** | Consensus | Runs multi-LLM consensus loops. Claude + GPT-4o + Gemini cross-review until convergence. |
+| **Nelson** | Consensus | Runs multi-LLM consensus loops. Multiple models cross-review until convergence. |
 | **Julius** | Decomposer | Breaks plans into minimal tasks with dependency graphs. |
 | **Sherlock** | Enricher | Deep codebase inspection → file-level execution plans. |
 | **Leonard** | Implementer | Writes code, runs tests, validates against acceptance criteria. |
@@ -107,12 +107,12 @@ commands:
   lint: "uv run ruff check ."
 
 llm:
-  default_model: anthropic/claude-sonnet-4
+  default_model: provider/model-name
   consensus:
     models:
-      - anthropic/claude-sonnet-4
-      - openai/gpt-4o
-      - google/gemini-2.0-flash
+      - provider-a/model-1
+      - provider-b/model-2
+      - provider-c/model-3
 
 budget:
   soft_limit: 5.00
