@@ -4,7 +4,7 @@
 > validation checklist when writing or reviewing any spec.
 >
 > **Origin**: Extracted from reviewing 22 specs across sessions 1-3 of the
-> ai-team project. These patterns recurred often enough to formalize.
+> opex project. These patterns recurred often enough to formalize.
 >
 > **Coverage lattice**:
 > - P1 (Happy Path) + P2 (Entry/Exit) + P8 (No Silent Failures) → catch **missing behavior**

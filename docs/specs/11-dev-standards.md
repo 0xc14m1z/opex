@@ -4,7 +4,7 @@
 
 ## Overview
 
-Standards and practices for developing the ai-team system itself. This is our own
+Standards and practices for developing the opex system itself. This is our own
 codebase's rulebook — separate from the rules agents enforce on target repos.
 
 ---
@@ -43,7 +43,7 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ai_team_core", "nelson", "julius", "sherlock", "leonard", "katherine", "richelieu"]
+known-first-party = ["opex_core", "nelson", "julius", "sherlock", "leonard", "katherine", "richelieu"]
 ```
 
 ### Type Checking
@@ -111,28 +111,28 @@ See spec 10 for the full testing strategy.
 
 ### Imports
 
-- Standard library → third-party → first-party (`ai_team_core`) → local.
+- Standard library → third-party → first-party (`opex_core`) → local.
 - Enforced by ruff's isort integration.
 - Prefer explicit imports over star imports.
 
 ### Error Handling
 
-- **Custom exception hierarchy** rooted in `AiTeamError`.
+- **Custom exception hierarchy** rooted in `OpexError`.
 - Each agent defines its own exception subtypes.
 - Always include context in exceptions (task ID, agent name, what was being attempted).
 - Never catch bare `Exception` unless re-raising or logging + escalating.
 
 ```python
-class AiTeamError(Exception):
-    """Base exception for all ai-team errors."""
+class OpexError(Exception):
+    """Base exception for all opex errors."""
 
-class ConsensusError(AiTeamError):
+class ConsensusError(OpexError):
     """Nelson-specific errors."""
 
 class ConsensusTimeoutError(ConsensusError):
     """All providers failed to respond within the timeout."""
 
-class DecompositionError(AiTeamError):
+class DecompositionError(OpexError):
     """Julius-specific errors."""
 ```
 
@@ -204,7 +204,7 @@ jobs:
 
 - All PRs require at least one review.
 - CI must pass before merge.
-- Dog-fooding (Phase 8+): ai-team reviews its own PRs through the standard
+- Dog-fooding (Phase 8+): opex reviews its own PRs through the standard
   agent pipeline. Human still has final say.
 
 ---

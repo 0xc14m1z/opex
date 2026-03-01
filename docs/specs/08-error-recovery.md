@@ -165,7 +165,7 @@ async def resume_or_start(self, task_id: str) -> AgentState:
 | Budget exceeded (hard limit) | Halt task, escalate with cost summary |
 | All LLM providers down | Halt pipeline, alert human |
 | Target repo access denied | Halt pipeline, alert human to fix auth |
-| `.ai-team.yaml` invalid | Halt pipeline, report validation errors |
+| `.opex.yaml` invalid | Halt pipeline, report validation errors |
 
 ## Retry Behavior
 
@@ -181,7 +181,7 @@ class RetryTracker:
         self,
         task_id: str,
         agent: str,
-        error: AiTeamError,
+        error: OpexError,
     ) -> RetryDecision:
         count = await self.store.increment_retry_count(task_id, agent)
 

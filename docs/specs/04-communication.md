@@ -250,7 +250,7 @@ For the full 20-step end-to-end pipeline flow, see spec 01.
 
 5. Leonard consumes from `pipeline:X:enriched` (consumer group):
    Implements code, publishes to `pipeline:X:reviews`:
-   {type: "implementation_complete", payload: {task_id: "t1", branch: "ai-team/...", ...}}
+   {type: "implementation_complete", payload: {task_id: "t1", branch: "opex/...", ...}}
 
 6. Katherine consumes from `pipeline:X:reviews`:
    Requests consensus via `pipeline:X:consensus`:

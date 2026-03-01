@@ -51,7 +51,7 @@ orchestrator/
 ```
 
 The orchestrator is a **uv workspace member** alongside `core/` and each agent package.
-It depends on `ai-team-core` for shared models (DependencyGraph, TaskStatus, MessageEnvelope).
+It depends on `opex-core` for shared models (DependencyGraph, TaskStatus, MessageEnvelope).
 
 ---
 
@@ -190,11 +190,11 @@ class Launcher(Protocol):
         """Launch an agent container. Returns container ID.
 
         The Launcher is responsible for:
-        - Selecting the correct image (ai-team-{agent}:latest)
-        - Applying the agent's resource limits (defaults + .ai-team.yaml overrides)
+        - Selecting the correct image (opex-{agent}:latest)
+        - Applying the agent's resource limits (defaults + .opex.yaml overrides)
         - Filtering secrets via the agent's allowlist
         - Configuring the Loki logging driver
-        - Connecting to the ai-team-net network
+        - Connecting to the opex-net network
         - Setting container labels for identification
         """
         ...
@@ -220,14 +220,14 @@ class Launcher(Protocol):
 
 | Parameter         | Value                                                        |
 |-------------------|--------------------------------------------------------------|
-| Image             | `ai-team-{agent}:latest` (built by `make build`)            |
-| Network           | `ai-team-net`                                                |
+| Image             | `opex-{agent}:latest` (built by `make build`)            |
+| Network           | `opex-net`                                                |
 | Volumes           | Per agent filesystem access rules (see spec 05 Volumes section) |
 | Environment       | Filtered secrets (see Secret Scoping below) + `PIPELINE_ID` + `TASK_ID` + agent-specific vars |
-| Name              | `ai-team-{agent}-{pipeline_id[:8]}-{task_id[:8]}`           |
+| Name              | `opex-{agent}-{pipeline_id[:8]}-{task_id[:8]}`           |
 | Restart policy    | `no` (the orchestrator handles retries)                        |
-| Labels            | `ai-team.agent={agent}`, `ai-team.pipeline={pipeline_id}`, `ai-team.task={task_id}` |
-| Resource limits   | Per-agent defaults merged with `.ai-team.yaml` overrides (see spec 05) |
+| Labels            | `opex.agent={agent}`, `opex.pipeline={pipeline_id}`, `opex.task={task_id}` |
+| Resource limits   | Per-agent defaults merged with `.opex.yaml` overrides (see spec 05) |
 | Log config        | Loki logging driver (see Logging for Ephemeral Agents below) |
 
 ### Launcher backends
@@ -266,7 +266,7 @@ log_config = docker.types.LogConfig(
 )
 
 container = client.containers.run(
-    image=f"ai-team-{agent}:{tag}",
+    image=f"opex-{agent}:{tag}",
     log_config=log_config,
     # ... other params
 )
@@ -311,12 +311,12 @@ No agent receives secrets it doesn't need. In particular:
 - If an agent doesn't call LLMs directly (communicates with Nelson via Redis
   instead), it can be removed from the `OPENROUTER_API_KEY` list.
 
-### `.ai-team.yaml` overrides
+### `.opex.yaml` overrides
 
 The target repo owner can extend (but not reduce) the allowlists:
 
 ```yaml
-# .ai-team.yaml
+# .opex.yaml
 secrets:
   leonard:
     additional:
@@ -404,7 +404,7 @@ class PipelineCreatedPayload(BaseModel):
     plan: str                            # The human's plan text
     repo_url: str
     target_branch: str
-    config: AiTeamConfig                 # Parsed .ai-team.yaml
+    config: OpexConfig                 # Parsed .opex.yaml
 ```
 
 ### `decomposition_complete`
@@ -728,7 +728,7 @@ The architecture provides crash recovery through existing infrastructure:
 2. **PostgreSQL state**: Pipeline and container state survives orchestrator
    restarts. The orchestrator reads its last known state from PostgreSQL on startup.
 
-3. **Docker labels**: All agent containers are labeled with `ai-team.*` labels.
+3. **Docker labels**: All agent containers are labeled with `opex.*` labels.
    The orchestrator can discover running containers via Docker API queries.
 
 ### Handler idempotency
@@ -750,7 +750,7 @@ On startup, the orchestrator reconciles its state before entering the event loop
 
 ```mermaid
 flowchart TD
-    A["1. Connect to PostgreSQL\nLoad pipeline and container state"] --> B["2. List Docker containers\nwith ai-team.* labels"]
+    A["1. Connect to PostgreSQL\nLoad pipeline and container state"] --> B["2. List Docker containers\nwith opex.* labels"]
     B --> C{"3. For each container"}
     C -->|"In DB + running"| D["Adopt\n(update last_heartbeat)"]
     C -->|"In DB + stopped"| E["Check exit code\nProcess result if not already processed"]
@@ -802,12 +802,12 @@ class OrchestratorConfig(BaseSettings):
     max_retries: int = 3
 
     # Docker
-    docker_network: str = "ai-team-net"
-    image_prefix: str = "ai-team"          # Images: ai-team-julius, ai-team-sherlock, etc.
+    docker_network: str = "opex-net"
+    image_prefix: str = "opex"          # Images: opex-julius, opex-sherlock, etc.
     image_tag: str = "latest"
 
     # Database
-    database_url: str = "postgresql://ai_team:ai_team@postgres:5432/ai_team"
+    database_url: str = "postgresql://opex:opex@postgres:5432/opex"
 
     # Pipeline error threshold (consecutive errors before pausing)
     pipeline_error_threshold: int = 5

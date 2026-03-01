@@ -14,9 +14,9 @@ This document catalogs every model, its purpose, and where it's used.
 ## Model Organization
 
 ```
-core/src/ai_team_core/models/
+core/src/opex_core/models/
 ├── __init__.py          # Re-exports all models
-├── config.py            # .ai-team.yaml schema
+├── config.py            # .opex.yaml schema
 ├── task.py              # Tasks, execution plans, dependency graphs
 ├── consensus.py         # Consensus requests, responses, weights
 ├── review.py            # Code review, human review scoring
@@ -114,7 +114,7 @@ class CommandsConfig(BaseModel):
 
 class GitConfig(BaseModel):
     default_branch: str = "main"
-    branch_prefix: str = "ai-team/"
+    branch_prefix: str = "opex/"
     require_pr: bool = True
     auto_merge: bool = False
     conventional_commits: bool = True
@@ -126,10 +126,10 @@ class ReviewConfig(BaseModel):
 
 class IntakeConfig(BaseModel):
     class Labels(BaseModel):
-        trigger: str = "ai-team"
-        in_progress: str = "ai-team:working"
-        done: str = "ai-team:done"
-        needs_human: str = "ai-team:needs-human"
+        trigger: str = "opex"
+        in_progress: str = "opex:working"
+        done: str = "opex:done"
+        needs_human: str = "opex:needs-human"
     labels: Labels = Labels()
     issue_template: str | None = None
 
@@ -150,8 +150,8 @@ class LLMConfig(BaseModel):
     consensus: LLMConsensusConfig
     overrides: dict[AgentName, str] = {}       # agent → model ID
 
-class AiTeamConfig(BaseModel):
-    """Root model for .ai-team.yaml."""
+class OpexConfig(BaseModel):
+    """Root model for .opex.yaml."""
     version: str
     project: ProjectConfig
     knowledge: KnowledgeConfig = KnowledgeConfig()
@@ -191,7 +191,7 @@ class Task(BaseModel):
 
     # Assigned agent
     assigned_to: str | None = None           # "leonard-1"
-    branch: str | None = None                # "ai-team/feature/task-id"
+    branch: str | None = None                # "opex/feature/task-id"
     worktree_path: str | None = None
 
     # Execution tracking
@@ -267,7 +267,7 @@ class CodePattern(BaseModel):
 class TestStrategy(BaseModel):
     test_files_to_modify: list[str]
     test_files_to_create: list[str]
-    test_command: str                        # From .ai-team.yaml
+    test_command: str                        # From .opex.yaml
     coverage_expectation: str                # "maintain or increase"
 ```
 
@@ -546,7 +546,7 @@ class PipelineCreatedPayload(BaseModel):
     plan: str                                # The human's plan text
     repo_url: str
     target_branch: str
-    config: AiTeamConfig                     # Parsed .ai-team.yaml
+    config: OpexConfig                     # Parsed .opex.yaml
 
 
 class DecompositionCompletePayload(BaseModel):

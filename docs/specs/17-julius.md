@@ -15,7 +15,7 @@ Leonard can implement it and a single Katherine can review it in one pass.
 ## Responsibilities
 
 - Parse and understand the human's plan (natural language or structured).
-- Read the target repo's `.ai-team.yaml` configuration and guidelines.
+- Read the target repo's `.opex.yaml` configuration and guidelines.
 - Analyze the codebase at a high level (directory structure, key modules, dependencies).
 - Break the plan into tasks where each task touches the **minimum number of files**.
 - Build a **dependency graph** identifying which tasks can run in parallel vs. which must be sequential.
@@ -43,7 +43,7 @@ Leonard can implement it and a single Katherine can review it in one pass.
 - **Data available**:
   - Plan description (human's plan text, from the pipeline record).
   - Target repo at `/workspace` (read-only access).
-  - `.ai-team.yaml` configuration (parsed).
+  - `.opex.yaml` configuration (parsed).
 
 ### Output
 
@@ -67,11 +67,11 @@ the `decomposition_complete` message.
 ## Algorithm / Process
 
 1. **Read plan**: Parse the human's plan text from the pipeline record.
-2. **Read configuration**: Load `.ai-team.yaml` from the target repo. Extract guidelines, commands, knowledge references.
+2. **Read configuration**: Load `.opex.yaml` from the target repo. Extract guidelines, commands, knowledge references.
 3. **Analyze codebase structure**:
    - Scan directory tree for key modules and packages.
    - Identify the project's language, framework, and primary patterns.
-   - Read architecture docs and relevant knowledge files referenced in `.ai-team.yaml`.
+   - Read architecture docs and relevant knowledge files referenced in `.opex.yaml`.
    - Build a mental model of the codebase's structure and module boundaries.
 4. **Decompose plan into tasks**:
    - Break the plan into the smallest logical units of work.
@@ -105,7 +105,7 @@ the `decomposition_complete` message.
 
 ## Principles Integration
 
-Julius reads implementation principles from `.ai-team/principles/implementation/`
+Julius reads implementation principles from `.opex/principles/implementation/`
 to understand what patterns and conventions the team values. This context helps
 Julius size tasks appropriately -- for example, if there is a principle requiring
 repository pattern usage, Julius ensures tasks that add data access include time
@@ -133,7 +133,7 @@ Expected tools:
 - **File system read**: Read files and directories in the target repo (read-only).
 - **Directory listing**: List directory contents to understand project structure.
 - **Dependency analysis**: Analyze import graphs and module relationships.
-- **Configuration reader**: Parse `.ai-team.yaml` and extract relevant settings.
+- **Configuration reader**: Parse `.opex.yaml` and extract relevant settings.
 - **Nelson request**: Submit consensus requests for decomposition validation.
 - **Redis publish**: Publish `task_created` and `decomposition_complete` messages.
 
@@ -163,15 +163,15 @@ Expected tools:
 | CPU reservation    | 0.25   |                                          |
 | Memory reservation | 256M   |                                          |
 
-Overridable via `.ai-team.yaml` `resources.julius` section (see spec 12).
+Overridable via `.opex.yaml` `resources.julius` section (see spec 12).
 
 ---
 
 ## Configuration
 
-- **`.ai-team.yaml`**: Project description, knowledge references, guidelines, commands.
+- **`.opex.yaml`**: Project description, knowledge references, guidelines, commands.
 - **Environment variables**: `PIPELINE_ID`, `OPENROUTER_API_KEY`, `DATABASE_URL`, `REDIS_URL`.
-- **LLM model**: Uses `llm.default_model` from `.ai-team.yaml` (or per-agent override `llm.overrides.julius`).
+- **LLM model**: Uses `llm.default_model` from `.opex.yaml` (or per-agent override `llm.overrides.julius`).
 
 ---
 

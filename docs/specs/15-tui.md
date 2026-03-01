@@ -24,7 +24,7 @@ It connects to one or more AI team deployments via their API servers.
 ### Key design decisions
 
 - **Not a Docker Compose service**: The TUI is a pip-installable Python package
-  (`pip install ai-team-tui` or `uv tool install ai-team-tui`).
+  (`pip install opex-tui` or `uv tool install opex-tui`).
 - **Multi-team support**: The TUI can switch between multiple AI team
   deployments. Each team has its own connection string.
 - **No direct database access**: The TUI only talks to the API server (spec 14). It
@@ -44,13 +44,13 @@ flowchart LR
 The TUI uses the connection string format defined in spec 14:
 
 ```yaml
-# ~/.ai-team/config.yaml
+# ~/.opex/config.yaml
 teams:
   - name: my-app
     url: https://localhost:8080
     token: at-...
   - name: other-project
-    url: https://ai-team-other.tailnet.ts.net:8080
+    url: https://opex-other.tailnet.ts.net:8080
     token: at-...
 ```
 
@@ -93,7 +93,7 @@ The main view showing the current state of all active work. Data is sourced from
 `GET /pipelines` (initial load) and `GET /stream/pipelines` (real-time updates).
 
 ```
-┌─ AI-Team Dashboard ──────────────────────────────────── 14:32:05 ─┐
+┌─ Opex Dashboard ──────────────────────────────────── 14:32:05 ─┐
 │                                                                    │
 │  PIPELINE: feature/add-user-auth ───────────────────────────────── │
 │                                                                    │
@@ -135,7 +135,7 @@ Drill into a specific task to see its full lifecycle. Data sourced from
 │  Status: enriching (Sherlock)                                      │
 │  Dependencies: none                                                │
 │  Blocks: #3, #4                                                    │
-│  Branch: ai-team/add-user-auth/task-2                             │
+│  Branch: opex/add-user-auth/task-2                             │
 │                                                                    │
 │  ┌─ Timeline ───────────────────────────────────────────────────┐  │
 │  │  14:24:05  Julius    created task                            │  │
@@ -262,7 +262,7 @@ Switch between multiple AI team deployments. Each team has its own
 connection string and independent pipeline state.
 
 ```
-┌─ AI Teams ──────────────────────────────────────────────┐
+┌─ Opexs ──────────────────────────────────────────────┐
 │                                                          │
 │  [*] my-app         (3 pipelines, 2 active, 12 principles)
 │  [ ] other-project  (1 pipeline, idle, 4 principles)    │

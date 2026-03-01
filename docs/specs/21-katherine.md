@@ -24,7 +24,7 @@ operate more independently.
 - If approved: calculate a **human review score** via Nelson consensus.
 - Apply the adaptive threshold to decide whether human review is required.
 - Post structured review comments on the task PR (via Richelieu).
-- Enforce review principles from `.ai-team/principles/review/`.
+- Enforce review principles from `.opex/principles/review/`.
 - Learn from human review decisions to calibrate scoring weights over time.
 
 ---
@@ -48,8 +48,8 @@ operate more independently.
   - The diff (changes made by Leonard on the task branch).
   - The original task definition from Julius.
   - Sherlock's mini execution plan (acceptance criteria, patterns to follow).
-  - `.ai-team.yaml` configuration (guidelines, review settings).
-  - Review principles from `.ai-team/principles/review/`.
+  - `.opex.yaml` configuration (guidelines, review settings).
+  - Review principles from `.opex/principles/review/`.
   - Historical review data from PostgreSQL (for adaptive threshold).
 
 ### Output
@@ -70,8 +70,8 @@ operate more independently.
 1. Read the diff (Leonard's changes).
 2. Read the original task definition.
 3. Read Sherlock's execution plan (acceptance criteria, patterns, conventions).
-4. Load review principles from `.ai-team/principles/review/`.
-5. Load `.ai-team.yaml` guidelines and review configuration.
+4. Load review principles from `.opex/principles/review/`.
+5. Load `.opex.yaml` guidelines and review configuration.
 
 ### Step 2: Multi-LLM Code Review via Nelson
 
@@ -85,7 +85,7 @@ Submit a `consensus_request` to Nelson (spec 16) with four review dimensions:
 **Style**:
 - Does the code follow codebase conventions (naming, structure, imports)?
 - Does it match patterns identified by Sherlock?
-- Does it comply with guidelines in `.ai-team.yaml`?
+- Does it comply with guidelines in `.opex.yaml`?
 
 **Safety**:
 - Are there security concerns (injection, auth bypass, data exposure)?
@@ -144,13 +144,13 @@ Compare the human review score against the adaptive threshold:
 - **Score >= threshold**: Flag the PR for human review. Apply `needs-human-review` label.
 - **Score < threshold**: Auto-approve. Apply `autonomous` label.
 
-The threshold is configured in `.ai-team.yaml` (`review.human_review_threshold`,
+The threshold is configured in `.opex.yaml` (`review.human_review_threshold`,
 default: 0.7) and evolves via adaptive learning (see below).
 
 #### Always-flag paths
 
 Certain file paths always trigger human review regardless of score, configured in
-`.ai-team.yaml`:
+`.opex.yaml`:
 
 ```yaml
 review:
@@ -209,7 +209,7 @@ based on the team's specific patterns and risk tolerance.
 
 ## Principles Integration
 
-Katherine enforces **review principles** from `.ai-team/principles/review/`:
+Katherine enforces **review principles** from `.opex/principles/review/`:
 
 1. Loads all active review principles at the start of each review.
 2. Includes principles in the Nelson consensus request context.
@@ -246,7 +246,7 @@ Expected tools:
 - **File reader**: Read source files in the repo and worktree for context.
 - **Complexity analysis**: Calculate cyclomatic complexity delta, count files changed.
 - **Nelson request**: Submit consensus requests for code review and human review scoring.
-- **Principles reader**: Read and filter review principles from `.ai-team/principles/review/`.
+- **Principles reader**: Read and filter review principles from `.opex/principles/review/`.
 - **Historical data query**: Query PostgreSQL for historical review accuracy data.
 - **Redis publish**: Publish `review_result` messages.
 
@@ -275,18 +275,18 @@ Expected tools:
 | CPU reservation    | 0.25   |                                          |
 | Memory reservation | 256M   |                                          |
 
-Overridable via `.ai-team.yaml` `resources.katherine` section (see spec 12).
+Overridable via `.opex.yaml` `resources.katherine` section (see spec 12).
 
 ---
 
 ## Configuration
 
-- **`.ai-team.yaml`** (`review:` section):
+- **`.opex.yaml`** (`review:` section):
   - `human_review_threshold`: Score above which human review is required (default: 0.7).
   - `always_human_review`: File path patterns that always trigger human review.
-- **`.ai-team.yaml`** (`llm:` section): Model configuration for Nelson consensus calls.
+- **`.opex.yaml`** (`llm:` section): Model configuration for Nelson consensus calls.
 - **Environment variables**: `PIPELINE_ID`, `TASK_ID`, `OPENROUTER_API_KEY`, `DATABASE_URL`, `REDIS_URL`.
-- **LLM model**: Uses `llm.default_model` from `.ai-team.yaml` (or per-agent override `llm.overrides.katherine`).
+- **LLM model**: Uses `llm.default_model` from `.opex.yaml` (or per-agent override `llm.overrides.katherine`).
 - **PostgreSQL**: Historical review decisions for adaptive threshold learning.
 
 ---

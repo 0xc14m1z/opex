@@ -16,7 +16,7 @@ All agents (including Nelson and Richelieu) are ephemeral one-shot containers.
 
 ### ~~3. Model Selection Strategy~~ — RESOLVED
 
-Resolved: Model selection is configured in `.ai-team.yaml` under the `llm:` section.
+Resolved: Model selection is configured in `.opex.yaml` under the `llm:` section.
 Each target repo specifies `default_model`, `consensus.models`, and optional per-agent
 `overrides`. All calls go through OpenRouter via LiteLLM. See specs 12 and 01.
 
@@ -92,7 +92,7 @@ Requests queue in Redis if the limit is reached. See specs 05, 13.
 
 ### ~~16. Secret Scoping~~ — RESOLVED
 Per-agent secret allowlists implemented in the Launcher. Each agent only receives the
-env vars it needs. Target repo can extend (not reduce) allowlists via `.ai-team.yaml`.
+env vars it needs. Target repo can extend (not reduce) allowlists via `.opex.yaml`.
 See spec 09.
 
 ### ~~17. Docker Socket Security~~ — RESOLVED
@@ -104,5 +104,5 @@ No restrictions, audit only. Agents need internet for packages, docs, LLM APIs. 
 outbound connections logged for audit. Forward proxy deferred. See spec 09.
 
 ### ~~19. Repo Volume Lifecycle~~ — RESOLVED
-`make connect REPO=<url>` clones into ai-team-repo volume. Persists across pipelines
+`make connect REPO=<url>` clones into opex-repo volume. Persists across pipelines
 (warm cache). Richelieu fetches latest before each pipeline. See spec 12.

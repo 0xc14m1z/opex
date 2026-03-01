@@ -20,10 +20,10 @@ concrete implementation work.
 - Identify exact files to create or modify (with line-level precision where possible).
 - Note existing conventions (naming, error handling, test patterns, imports).
 - Produce a step-by-step execution plan with all context Leonard needs.
-- Include relevant implementation principles from `.ai-team/principles/implementation/`.
+- Include relevant implementation principles from `.opex/principles/implementation/`.
 - Use Nelson (spec 16) when there are ambiguous implementation approaches to resolve.
 - Include acceptance criteria derived from the task definition.
-- Reference relevant `.ai-team.yaml` guidelines in the execution plan.
+- Reference relevant `.opex.yaml` guidelines in the execution plan.
 
 ---
 
@@ -45,8 +45,8 @@ concrete implementation work.
 - **Data available**:
   - Task definition from Julius (description, expected files, complexity estimate).
   - Target repo at `/workspace` (read-only access).
-  - `.ai-team.yaml` configuration (parsed).
-  - Principles from `.ai-team/principles/` (read-only).
+  - `.opex.yaml` configuration (parsed).
+  - Principles from `.opex/principles/` (read-only).
 
 ### Output
 
@@ -57,7 +57,7 @@ concrete implementation work.
   - Code patterns to follow (with examples from the codebase).
   - Test strategy (which tests to add/modify, how to run them).
   - Acceptance criteria derived from the task definition.
-  - References to relevant `.ai-team.yaml` guidelines.
+  - References to relevant `.opex.yaml` guidelines.
   - Relevant implementation principles.
 
 ---
@@ -69,14 +69,14 @@ concrete implementation work.
    - Scan the codebase for files related to the task (by name, imports, module structure).
    - Read relevant source files to understand current implementation.
    - Read relevant tests to understand testing patterns.
-   - Read documentation referenced in `.ai-team.yaml` knowledge section.
+   - Read documentation referenced in `.opex.yaml` knowledge section.
 3. **Note conventions**:
    - Identify naming patterns (variable names, function names, class names).
    - Identify error handling patterns (exception types, error messages, logging).
    - Identify test patterns (test structure, fixtures, mocking approach).
    - Identify import conventions and module boundaries.
 4. **Gather principles**:
-   - Query `.ai-team/principles/implementation/` for relevant principles.
+   - Query `.opex/principles/implementation/` for relevant principles.
    - Filter principles to those applicable to the task at hand.
    - Include principle content in the execution plan context.
 5. **Resolve ambiguity (if needed)**:
@@ -89,7 +89,7 @@ concrete implementation work.
    - Specify which tests to add or modify.
    - Define acceptance criteria (what "done" looks like).
    - Include examples from the codebase to follow.
-   - Reference relevant guidelines from `.ai-team.yaml`.
+   - Reference relevant guidelines from `.opex.yaml`.
 7. **Publish**: Publish `task_enriched` with the complete execution plan.
 
 ---
@@ -108,7 +108,7 @@ concrete implementation work.
 Sherlock is the primary channel through which principles reach Leonard's
 implementation context:
 
-1. Queries `.ai-team/principles/implementation/` for all active principles.
+1. Queries `.opex/principles/implementation/` for all active principles.
 2. Filters to principles relevant to the current task (by file patterns, module, agent).
 3. Includes relevant principles directly in the execution plan, with examples.
 4. Leonard's system prompt will include these principles when implementing.
@@ -141,8 +141,8 @@ Expected tools:
 - **Directory listing**: List directory contents to navigate the project structure.
 - **Search/grep**: Search for patterns, function names, class references across the codebase.
 - **AST parsing** (optional): Parse source files into ASTs for precise function/class identification.
-- **Configuration reader**: Parse `.ai-team.yaml` and extract relevant settings.
-- **Principles reader**: Read and filter principles from `.ai-team/principles/`.
+- **Configuration reader**: Parse `.opex.yaml` and extract relevant settings.
+- **Principles reader**: Read and filter principles from `.opex/principles/`.
 - **Nelson request**: Submit consensus requests for ambiguous approach resolution.
 - **Redis publish**: Publish `task_enriched` messages.
 
@@ -174,15 +174,15 @@ Expected tools:
 | CPU reservation    | 0.25   |                                          |
 | Memory reservation | 256M   |                                          |
 
-Overridable via `.ai-team.yaml` `resources.sherlock` section (see spec 12).
+Overridable via `.opex.yaml` `resources.sherlock` section (see spec 12).
 
 ---
 
 ## Configuration
 
-- **`.ai-team.yaml`**: Knowledge references (architecture docs, style guide, ADRs), guidelines, commands.
+- **`.opex.yaml`**: Knowledge references (architecture docs, style guide, ADRs), guidelines, commands.
 - **Environment variables**: `PIPELINE_ID`, `TASK_ID`, `OPENROUTER_API_KEY`, `DATABASE_URL`, `REDIS_URL`.
-- **LLM model**: Uses `llm.default_model` from `.ai-team.yaml` (or per-agent override `llm.overrides.sherlock`).
+- **LLM model**: Uses `llm.default_model` from `.opex.yaml` (or per-agent override `llm.overrides.sherlock`).
 
 ---
 

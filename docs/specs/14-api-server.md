@@ -61,7 +61,7 @@ POST /pipelines request body:
   "plan": "string - the human's plan text",
   "repo_url": "string - target repository URL",
   "target_branch": "string - branch to target (default: main)",
-  "config_overrides": {} - optional .ai-team.yaml overrides
+  "config_overrides": {} - optional .opex.yaml overrides
 }
 
 POST /pipelines response body:
@@ -219,19 +219,19 @@ multi-user access.
 The TUI connects to an AI team via a single connection string:
 
 ```
-ai-team://my-team.tailnet.ts.net:8080?token=at-...
+opex://my-team.tailnet.ts.net:8080?token=at-...
 ```
 
 Or in the TUI config file:
 
 ```yaml
-# ~/.ai-team/config.yaml
+# ~/.opex/config.yaml
 teams:
   - name: my-app
     url: https://localhost:8080
     token: at-...
   - name: other-project
-    url: https://ai-team-other.tailnet.ts.net:8080
+    url: https://opex-other.tailnet.ts.net:8080
     token: at-...
 ```
 

@@ -6,7 +6,7 @@
 
 ## Overview
 
-This spec defines the learning system that allows ai-team to improve over time
+This spec defines the learning system that allows opex to improve over time
 by extracting principles from human feedback. It covers learning mode (the
 training phase), the principle system (how learnings are stored and applied),
 and the adaptive review threshold (how the system calibrates when to escalate
@@ -27,14 +27,14 @@ is less important than accumulated principles.
 ### Configuration
 
 ```yaml
-# .ai-team.yaml
+# .opex.yaml
 learning:
   enabled: true              # Default for new pipelines
   auto_disable_after: null   # Or: 5 (disable after N tasks)
 ```
 
 Learning mode can be toggled per-pipeline:
-- **`.ai-team.yaml`**: Sets the default for new pipelines.
+- **`.opex.yaml`**: Sets the default for new pipelines.
 - **TUI**: `learning off` / `learning on` / `learning status` commands.
 - **GitHub**: Add/remove the `learning-mode` label on the feature issue/PR.
   The orchestrator watches for label changes via webhooks.
@@ -57,7 +57,7 @@ flowchart TD
     B --> C["3. Human reviews\nPosts additional comments on PR"]
     C --> D["4. System detects human feedback"]
     D --> E["5. Nelson analyzes all human comments\nExtracts candidate principles:\n- What was the issue?\n- Why didn't the system catch it?\n- What principle would prevent this?"]
-    E --> F["6. Principles saved to .ai-team/principles/\nHuman notified (async, NOT blocking)"]
+    E --> F["6. Principles saved to .opex/principles/\nHuman notified (async, NOT blocking)"]
     F --> G["7. Task branch deleted, worktree cleaned,\nold PR closed"]
     G --> H["8. Sherlock re-enriches task\nwith new principles in context"]
     H --> I["9. Leonard re-implements from scratch\n(full replay, new principles in system prompt)"]
@@ -74,7 +74,7 @@ flowchart TD
 Principles accumulate across tasks within a feature and across features:
 - Task-2 starts with all principles extracted during task-1.
 - A new feature started after feature A benefits from all of feature A's principles.
-- Principles live in the target repo (`.ai-team/principles/`) so they're
+- Principles live in the target repo (`.opex/principles/`) so they're
   available to every pipeline.
 
 ### Mid-feature toggle
@@ -147,7 +147,7 @@ the adaptive review threshold.
 
 Principles live in **two places**:
 
-1. **Target repo** (`.ai-team/principles/`) -- version-controlled, human-editable,
+1. **Target repo** (`.opex/principles/`) -- version-controlled, human-editable,
    diffable. This is the source of truth.
 2. **PostgreSQL** -- indexed for efficient agent queries, with metadata (when
    learned, from which PR, application history, confidence).
@@ -155,7 +155,7 @@ Principles live in **two places**:
 ### File structure
 
 ```
-.ai-team/
+.opex/
   principles/
     implementation/
       impl-001-repository-pattern.md
@@ -261,7 +261,7 @@ flagging it for human review.
 
 ### Configuration layers
 
-1. **`.ai-team.yaml`** (repo owner sets the floor):
+1. **`.opex.yaml`** (repo owner sets the floor):
    ```yaml
    review:
      human_review_threshold: 0.0    # Floor: system can never go below this

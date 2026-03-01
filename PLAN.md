@@ -1,4 +1,4 @@
-# AI-Team: Autonomous Agentic Development System
+# Opex: Autonomous Agentic Development System
 
 The detailed plan has been absorbed into the spec documents in `docs/specs/`.
 
@@ -21,7 +21,7 @@ architecture diagram, tech stack, project structure, and implementation phases.
 | 09 | [09-security.md](docs/specs/09-security.md) | Secrets, container hardening, filesystem permissions, prompt injection defense |
 | 10 | [10-testing.md](docs/specs/10-testing.md) | Record/replay (VCR), unit/integration/E2E pyramid, CI stages |
 | 11 | [11-dev-standards.md](docs/specs/11-dev-standards.md) | ruff + mypy strict + 90% coverage, coding conventions, CI pipeline |
-| 12 | [12-repo-connection.md](docs/specs/12-repo-connection.md) | GitHub App + PAT auth, cloning, webhooks, `.ai-team.yaml` full spec |
+| 12 | [12-repo-connection.md](docs/specs/12-repo-connection.md) | GitHub App + PAT auth, cloning, webhooks, `.opex.yaml` full spec |
 | 13 | [13-orchestrator.md](docs/specs/13-orchestrator.md) | Pipeline orchestrator: event router, container launcher, watchdog, dependency dispatch |
 | 14 | [14-api-server.md](docs/specs/14-api-server.md) | REST + SSE API for TUI client, authentication, endpoints |
 | 15 | [15-tui.md](docs/specs/15-tui.md) | TUI (Textual) with pipeline, task, log, consensus, and cost views |

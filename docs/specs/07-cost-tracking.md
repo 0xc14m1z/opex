@@ -122,10 +122,10 @@ Daily Hard Limit ($100/day) — ALWAYS enforced, cannot be overridden
 ### Configuration Sources (Priority Order)
 
 1. **Per-task override** (set by Julius when creating tasks, or by human).
-2. **`.ai-team.yaml`** project config (`budget.soft_limit_per_task`, `budget.hard_limit_per_task`).
+2. **`.opex.yaml`** project config (`budget.soft_limit_per_task`, `budget.hard_limit_per_task`).
    This is the primary place to configure soft/hard limits per project.
 3. **`.env`** — only `DAILY_BUDGET_HARD` as a system-level safety net.
-   Per-task defaults come from `.ai-team.yaml`, not `.env`.
+   Per-task defaults come from `.opex.yaml`, not `.env`.
 
 ### Enforcement Logic
 
@@ -243,4 +243,4 @@ Once enough data is collected, the system can suggest optimizations:
 - **Spec 08** (TUI): Real-time cost display, budget alerts.
 - **Spec 15** (Observability): `llm_call_completed`, `budget_warning`, `budget_exceeded` events.
 - **Spec 17** (Error Recovery): Budget exceeded is a fatal error that escalates to human.
-- **Spec 21** (Repo Connection): `.ai-team.yaml` `budget:` section for per-project limits.
+- **Spec 21** (Repo Connection): `.opex.yaml` `budget:` section for per-project limits.

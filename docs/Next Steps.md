@@ -24,7 +24,7 @@
   222 occurrences replaced across 23 files. Zero stale references.
 - **Project structure overhaul** (in `00-overview.md`):
   - Added `orchestrator/`, `api/`, `tui/` packages. Removed `dashboard/`.
-  - All packages under `ai_team.*` namespace (PEP 420 namespace packages).
+  - All packages under `opex.*` namespace (PEP 420 namespace packages).
   - Flat layout (no `src/` directory). Tests colocated with each package.
   - Phases updated: added Phase 8 (API Server), Phase 9 (TUI), renumbered
     E2E Integration to Phase 10, Hardening to Phase 11.
@@ -115,7 +115,7 @@ Spec says `/workspace/` is the main clone. Is this the Docker volume mount? Cros
 with spec 05 (infrastructure).
 
 **Issue 14 — Branch naming origin.**
-`ai-team/add-auth/task-1` — where does `add-auth` come from? Pipeline name? Human input?
+`opex/add-auth/task-1` — where does `add-auth` come from? Pipeline name? Human input?
 Julius?
 
 **Issue 15 — Parallelism limits scope.**
@@ -127,7 +127,7 @@ Are `max_parallel_leonards: 3` etc. per-pipeline or global across all pipelines?
 
 | Spec | Status | Notes |
 |------|--------|-------|
-| 00 Overview | **Reviewed** | Done. Updated with orchestrator rename, new project structure, ai_team.* namespace, revised phases. |
+| 00 Overview | **Reviewed** | Done. Updated with orchestrator rename, new project structure, opex.* namespace, revised phases. |
 | 01 Workflow | **In review** | 1/15 issues resolved (Issue 1: failure handling). 14 remaining. |
 | 02 Data Models | **Updated** | New: TaskStatus states, PipelineStatus states, RetryConfig, task_attempts, task_context_entries, diagnostic_chat tables. Needs full review after spec 01 completes. |
 | 03 Learning & Principles | Needs review | Verify Extract→Replay→Verify loop is fully specified. |
@@ -139,7 +139,7 @@ Are `max_parallel_leonards: 3` etc. per-pipeline or global across all pipelines?
 | 09 Security | Needs review | Secret scoping, socket proxy, egress. |
 | 10 Testing | Needs review | VCR, testcontainers. |
 | 11 Dev Standards | Needs review | ruff, mypy, coverage. |
-| 12 Repo Connection | Needs review | GitHub auth, .ai-team.yaml full schema. |
+| 12 Repo Connection | Needs review | GitHub auth, .opex.yaml full schema. |
 | 13 Orchestrator | Needs review | Event router, launcher, watchdog. Largest component spec. |
 | 14 API Server | **Updated** | Added human intervention endpoints, updated capabilities table. Still has TODOs for schemas/error format. |
 | 15 TUI | **Updated** | Added diagnostic chat mockups, human intervention actions, diff view capability. Still has TODOs for keybindings/principle browser. |
@@ -233,5 +233,5 @@ Create a detailed Phase 0 implementation plan.
 | Date | What was done |
 |------|---------------|
 | 2026-03-01 (s1) | Deep-dive spec 01 (deployment). 13 improvements + 5 new topics (learning mode, principles, API server, TUI, branching). Full rewrite. Reorganized all specs from 13→22 files. Renumbered: foundation (00-05), cross-cutting (06-12), components (13-21). Converted diagrams to Mermaid. |
-| 2026-03-01 (s2) | Swapped specs 01/02 (Workflow before Data Models). Renamed Controller → Orchestrator (file + 222 references). Overhauled project structure: ai_team.* namespace packages, flat layout, colocated tests, added orchestrator/api/tui packages, removed dashboard. Updated phases (added API Server + TUI, renumbered). Analyzed workflow spec — identified 15 issues for deep-dive discussion. |
+| 2026-03-01 (s2) | Swapped specs 01/02 (Workflow before Data Models). Renamed Controller → Orchestrator (file + 222 references). Overhauled project structure: opex.* namespace packages, flat layout, colocated tests, added orchestrator/api/tui packages, removed dashboard. Updated phases (added API Server + TUI, renumbered). Analyzed workflow spec — identified 15 issues for deep-dive discussion. |
 | 2026-03-01 (s3) | Created `knowledge_base/planning-principles.md` (8 principles: P1–P8). Resolved Workflow Issue 1 (failure scenarios) with 14 sub-decisions. Key design: no auto-FAILED state (P8), task-level failure isolation, PARTIALLY_FAILED pipeline state, diagnostic chat for human intervention, two abandon modes, Katherine verify_prerequisites mode. Updated specs 01, 02, 08, 14, 15. |

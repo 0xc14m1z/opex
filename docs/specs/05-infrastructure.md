@@ -18,7 +18,7 @@ of this infrastructure. The API server (spec 14) is the sole external interface.
 
 ```mermaid
 flowchart TD
-    subgraph DockerNet["Docker Compose Network (ai-team-net)"]
+    subgraph DockerNet["Docker Compose Network (opex-net)"]
         subgraph AlwaysRunning["Always-running (docker-compose.yml)"]
             Redis["Redis\n(internal)"]
             PG["PostgreSQL\n(internal)"]
@@ -49,7 +49,7 @@ flowchart TD
 
 ## Networking
 
-- **Internal network**: All containers share a Docker bridge network (`ai-team-net`).
+- **Internal network**: All containers share a Docker bridge network (`opex-net`).
 - **No direct container-to-container calls**: All communication flows through Redis.
 - **No exposed database ports**: Redis and PostgreSQL are internal-only. No ports
   mapped to the host.
@@ -69,14 +69,14 @@ All data paths are mounted as named Docker volumes to support cloud volume provi
 
 | Volume               | Mount Path (container)         | Access              | Purpose                          |
 |----------------------|--------------------------------|---------------------|----------------------------------|
-| `ai-team-redis`     | `/data`                        | Redis only          | Redis persistence (AOF/RDB)      |
-| `ai-team-postgres`  | `/var/lib/postgresql/data`     | PostgreSQL only     | PostgreSQL data directory         |
-| `ai-team-repo`      | `/workspace`                   | All agents (see below) | Target repo clone             |
-| `ai-team-worktrees` | `/workspace/.worktrees`        | Leonard + Richelieu (RW), others (RO) | Git worktrees for parallel tasks |
-| `ai-team-loki`      | `/loki`                        | Loki only           | Log index and chunk storage       |
-| `ai-team-grafana`   | `/var/lib/grafana`             | Grafana only        | Dashboard definitions and state   |
+| `opex-redis`     | `/data`                        | Redis only          | Redis persistence (AOF/RDB)      |
+| `opex-postgres`  | `/var/lib/postgresql/data`     | PostgreSQL only     | PostgreSQL data directory         |
+| `opex-repo`      | `/workspace`                   | All agents (see below) | Target repo clone             |
+| `opex-worktrees` | `/workspace/.worktrees`        | Leonard + Richelieu (RW), others (RO) | Git worktrees for parallel tasks |
+| `opex-loki`      | `/loki`                        | Loki only           | Log index and chunk storage       |
+| `opex-grafana`   | `/var/lib/grafana`             | Grafana only        | Dashboard definitions and state   |
 
-> **Removed**: The `ai-team-logs` volume from the original design. Agents log to
+> **Removed**: The `opex-logs` volume from the original design. Agents log to
 > stdout via structlog. The Docker Loki logging driver ships logs to Loki
 > automatically. No agent writes log files to disk.
 
@@ -118,7 +118,7 @@ services:
   redis:
     image: redis:latest
     volumes:
-      - ai-team-redis:/data
+      - opex-redis:/data
     command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -129,13 +129,13 @@ services:
   postgres:
     image: postgres:latest
     environment:
-      POSTGRES_DB: ai_team
-      POSTGRES_USER: ai_team
-      POSTGRES_PASSWORD: ai_team
+      POSTGRES_DB: opex
+      POSTGRES_USER: opex
+      POSTGRES_PASSWORD: opex
     volumes:
-      - ai-team-postgres:/var/lib/postgresql/data
+      - opex-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ai_team"]
+      test: ["CMD-SHELL", "pg_isready -U opex"]
       interval: 5s
     logging: *default-logging
     # No ports exposed — internal only
@@ -143,7 +143,7 @@ services:
   loki:
     image: grafana/loki:latest
     volumes:
-      - ai-team-loki:/loki
+      - opex-loki:/loki
     command: -config.file=/etc/loki/local-config.yaml
     # No logging driver — Loki uses Docker default (json-file)
     # to avoid circular dependency (Loki logging to itself).
@@ -156,7 +156,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
-      - ai-team-grafana:/var/lib/grafana
+      - opex-grafana:/var/lib/grafana
     depends_on:
       - loki
     # No Loki logging driver — same reason as Loki.
@@ -215,16 +215,16 @@ services:
   # See "All-Ephemeral Agent Model" below and spec 13.
 
 volumes:
-  ai-team-redis:
-  ai-team-postgres:
-  ai-team-repo:
-  ai-team-worktrees:
-  ai-team-loki:
-  ai-team-grafana:
+  opex-redis:
+  opex-postgres:
+  opex-repo:
+  opex-worktrees:
+  opex-loki:
+  opex-grafana:
 
 networks:
   default:
-    name: ai-team-net
+    name: opex-net
 ```
 
 ### Logging driver notes
@@ -281,26 +281,26 @@ six times, a **shared base image** is used.
 ```
 python:3.12-slim
     │
-    └── ai-team-base:latest
+    └── opex-base:latest
         │   Installs: core/ package + all shared dependencies
         │   Built by: make build-base
         │
-        ├── ai-team-julius:latest
+        ├── opex-julius:latest
         │   Adds: agents/julius/ package
         │
-        ├── ai-team-sherlock:latest
+        ├── opex-sherlock:latest
         │   Adds: agents/sherlock/ package
         │
-        ├── ai-team-leonard:latest
+        ├── opex-leonard:latest
         │   Adds: agents/leonard/ package + code execution tools
         │
-        ├── ai-team-katherine:latest
+        ├── opex-katherine:latest
         │   Adds: agents/katherine/ package
         │
-        ├── ai-team-nelson:latest
+        ├── opex-nelson:latest
         │   Adds: agents/nelson/ package
         │
-        └── ai-team-richelieu:latest
+        └── opex-richelieu:latest
             Adds: agents/richelieu/ package + git tools
 ```
 
@@ -322,14 +322,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 COPY core/ core/
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --package ai-team-core
+RUN uv sync --frozen --no-dev --package opex-core
 ```
 
 ### Agent Dockerfile template
 
 ```dockerfile
 # agents/{agent}/Dockerfile
-FROM ai-team-base:latest
+FROM opex-base:latest
 
 COPY agents/{agent}/ agents/{agent}/
 RUN uv sync --frozen --no-dev --package {agent}
@@ -341,8 +341,8 @@ ENTRYPOINT ["uv", "run", "python", "-m", "{agent}"]
 ### Build commands
 
 ```makefile
-build-base:    docker build -f docker/Dockerfile.base -t ai-team-base .
-build-agent:   docker build -f agents/$(AGENT)/Dockerfile -t ai-team-$(AGENT) .
+build-base:    docker build -f docker/Dockerfile.base -t opex-base .
+build-agent:   docker build -f agents/$(AGENT)/Dockerfile -t opex-$(AGENT) .
 build:         make build-base && for agent in julius sherlock leonard katherine nelson richelieu; do make build-agent AGENT=$$agent; done
 ```
 
@@ -352,7 +352,7 @@ build:         make build-base && for agent in julius sherlock leonard katherine
 
 Every ephemeral agent container is launched with resource limits to prevent
 runaway processes. Defaults are defined here; they can be overridden per agent
-in the target repo's `.ai-team.yaml`.
+in the target repo's `.opex.yaml`.
 
 ### Default resource profiles
 
@@ -365,13 +365,13 @@ in the target repo's `.ai-team.yaml`.
 | Katherine  | 1.0       | 1G          | 0.25            | 256M               | Diff analysis, LLM calls           |
 | Richelieu  | 0.5       | 512M        | 0.25            | 128M               | Git operations only                 |
 
-### `.ai-team.yaml` overrides
+### `.opex.yaml` overrides
 
 The target repo owner can override resource limits for agents that need more
 (e.g., Leonard running a heavy test suite):
 
 ```yaml
-# .ai-team.yaml
+# .opex.yaml
 resources:
   leonard:
     cpu_limit: 4.0
@@ -380,7 +380,7 @@ resources:
     memory_limit: 2G
 ```
 
-The Launcher merges `.ai-team.yaml` overrides with the defaults above. The
+The Launcher merges `.opex.yaml` overrides with the defaults above. The
 override values take precedence.
 
 ---
@@ -477,7 +477,7 @@ lint:               # Run ruff + mypy on all packages
 format:             # Run ruff format on all packages
 
 # ─── Operations ──────────────────────────────────────────
-connect:            # Connect ai-team to a target repo (make connect REPO=<url>)
+connect:            # Connect opex to a target repo (make connect REPO=<url>)
 tui:                # Launch the TUI client (standalone, not Docker)
 ```
 
@@ -498,7 +498,7 @@ GITHUB_PAT=ghp_...                       # Fallback if no GitHub App
 
 # --- Infrastructure ---
 REDIS_URL=redis://redis:6379
-DATABASE_URL=postgresql+asyncpg://ai_team:ai_team@postgres:5432/ai_team
+DATABASE_URL=postgresql+asyncpg://opex:opex@postgres:5432/opex
 
 # --- API Server ---
 API_TOKEN=at-...                          # Token for TUI authentication
@@ -515,7 +515,7 @@ DAILY_BUDGET_HARD=100.00                  # USD per day across all tasks
 | Component   | Health check mechanism                              | Interval |
 |-------------|-----------------------------------------------------|----------|
 | Redis       | `redis-cli ping` (Docker Compose healthcheck)       | 5s       |
-| PostgreSQL  | `pg_isready -U ai_team` (Docker Compose healthcheck)| 5s       |
+| PostgreSQL  | `pg_isready -U opex` (Docker Compose healthcheck)| 5s       |
 | Orchestrator  | Redis heartbeat key (`orchestrator:heartbeat`)        | 10s write, 15s check |
 | API Server  | `/health` endpoint (Docker Compose healthcheck)     | 15s      |
 | Agents      | Redis `status` stream heartbeats (every 30s)        | 30s      |

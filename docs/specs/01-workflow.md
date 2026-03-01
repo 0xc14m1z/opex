@@ -59,13 +59,13 @@ stateDiagram-v2
 
 ### Repo volume lifecycle
 
-1. **`make connect REPO=<url>`** -- Clones the target repo into the `ai-team-repo`
+1. **`make connect REPO=<url>`** -- Clones the target repo into the `opex-repo`
    volume. This is a one-time setup operation. The clone persists across pipelines
    (warm cache).
 
 2. **Pipeline starts** -- Richelieu runs `git fetch origin` to pull the latest
    changes, then creates a feature branch from `origin/{default_branch}` (the
-   default branch is configured in `.ai-team.yaml`). The feature branch is pushed
+   default branch is configured in `.opex.yaml`). The feature branch is pushed
    to GitHub.
 
 3. **Task starts** -- Richelieu creates a worktree + task branch from the feature
@@ -92,12 +92,12 @@ flowchart TD
     main --> FA[feature/add-auth]
     main --> FB[feature/fix-perf]
 
-    FA --> T1["ai-team/add-auth/task-1\nPR #101 -> feature/add-auth"]
-    FA --> T2["ai-team/add-auth/task-2\nPR #102 -> feature/add-auth"]
-    FA --> T3["ai-team/add-auth/task-3\nPR #103 -> feature/add-auth\n(depends on task-1, branches\nAFTER PR #101 merges)"]
+    FA --> T1["opex/add-auth/task-1\nPR #101 -> feature/add-auth"]
+    FA --> T2["opex/add-auth/task-2\nPR #102 -> feature/add-auth"]
+    FA --> T3["opex/add-auth/task-3\nPR #103 -> feature/add-auth\n(depends on task-1, branches\nAFTER PR #101 merges)"]
 
-    FB --> T4["ai-team/fix-perf/task-4\nPR #104 -> feature/fix-perf"]
-    FB --> T5["ai-team/fix-perf/task-5\nPR #105 -> feature/fix-perf"]
+    FB --> T4["opex/fix-perf/task-4\nPR #104 -> feature/fix-perf"]
+    FB --> T5["opex/fix-perf/task-5\nPR #105 -> feature/fix-perf"]
 
     FA -->|"All task PRs merged"| PR106["PR #106: feature/add-auth -> main"]
     FB -->|"All task PRs merged"| PR107["PR #107: feature/fix-perf -> main"]
@@ -132,9 +132,9 @@ flowchart TD
 ```
 /workspace/                              # Main clone, checked out on default branch
 /workspace/.worktrees/
-  add-auth--task-1/                      # Worktree on ai-team/add-auth/task-1
-  add-auth--task-2/                      # Worktree on ai-team/add-auth/task-2
-  fix-perf--task-4/                      # Worktree on ai-team/fix-perf/task-4
+  add-auth--task-1/                      # Worktree on opex/add-auth/task-1
+  add-auth--task-2/                      # Worktree on opex/add-auth/task-2
+  fix-perf--task-4/                      # Worktree on opex/fix-perf/task-4
 ```
 
 ---
@@ -182,7 +182,7 @@ Every task PR goes through this review flow on GitHub:
 
 | Label                    | Applied when                                    |
 |--------------------------|-------------------------------------------------|
-| `ai-team`               | All PRs created by the system                   |
+| `opex`               | All PRs created by the system                   |
 | `learning-mode`         | Feature is in learning mode                     |
 | `learning: replay-N`    | Task PR is the Nth replay in learning mode      |
 | `autonomous`            | Task completed without human review             |
@@ -318,7 +318,7 @@ is stuck in `NEEDS_HUMAN` or `ABANDONED_HUMAN_TAKEOVER`.
 
 ### Retry mechanics
 
-- **Retry count**: Configurable in `.ai-team.yaml` under `retries.max_task_retries`
+- **Retry count**: Configurable in `.opex.yaml` under `retries.max_task_retries`
   (default: 2 retries = 3 total attempts). Overridable per-pipeline from the TUI.
 - **Retry strategy: from scratch.** Leonard makes a **single commit** at task
   completion — no intermediate commits. Julius creates tasks small enough
@@ -481,7 +481,7 @@ flowchart TD
 
 ## Retry Configuration
 
-### In `.ai-team.yaml`
+### In `.opex.yaml`
 
 ```yaml
 retries:

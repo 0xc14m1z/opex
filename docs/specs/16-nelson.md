@@ -74,7 +74,7 @@ class ConsensusRequest(BaseModel):
     # Consensus settings (overridable per request)
     max_rounds: int = 3                      # Max cross-review iterations
     required_agreement: float = 0.67         # Fraction needed (0.67 = 2/3)
-    providers: list[str] | None              # Override models from .ai-team.yaml
+    providers: list[str] | None              # Override models from .opex.yaml
                                              # e.g., ["anthropic/claude-sonnet-4",
                                              #        "openai/gpt-4o"]
     priority: Literal["low", "normal", "high"] = "normal"
@@ -256,7 +256,7 @@ def calculate_confidence(
 ### Initial Weights
 
 All providers start with equal weight. The providers used for consensus are
-configured in `.ai-team.yaml` under `llm.consensus.models`. For example, with
+configured in `.opex.yaml` under `llm.consensus.models`. For example, with
 three providers (`anthropic/claude-sonnet-4`, `openai/gpt-4o`,
 `google/gemini-2.0-flash`):
 - anthropic/claude-sonnet-4: 1.0
@@ -382,7 +382,7 @@ review_goals:
 Nelson does not directly apply principles. However, when agents include principles
 in their `system_context` or `prompt` fields, Nelson evaluates them as part of the
 consensus. For example, when Katherine asks Nelson to review code, the review
-principles from `.ai-team/principles/review/` are included in the prompt context.
+principles from `.opex/principles/review/` are included in the prompt context.
 
 Nelson also plays a key role in **learning mode** (see spec 03): it analyzes human
 comments on PRs and extracts candidate principles via consensus.
@@ -395,10 +395,10 @@ Nelson can be called directly by humans through the TUI or CLI:
 
 ```bash
 # Ask Nelson a question directly
-ai-team ask "What's the best approach to implement caching for this API?"
+opex ask "What's the best approach to implement caching for this API?"
 
 # Ask with specific review goals
-ai-team ask "Review this SQL migration" --goals "data safety" "backwards compatibility"
+opex ask "Review this SQL migration" --goals "data safety" "backwards compatibility"
 ```
 
 ---
@@ -435,7 +435,7 @@ Optimization strategies:
    (e.g., formatting, simple code generation), do not involve Nelson.
 2. **Use cheaper models for cross-review**: Initial response from top-tier models,
    cross-review from cheaper tiers. Configure via `llm.consensus.models` in
-   `.ai-team.yaml` -- use cheaper models in the list to reduce cost.
+   `.opex.yaml` -- use cheaper models in the list to reduce cost.
 3. **Cache identical prompts**: If the same exact prompt was recently evaluated,
    return the cached result.
 4. **Early termination**: If all providers agree in round 1, skip remaining rounds.
@@ -470,7 +470,7 @@ Optimization strategies:
 | CPU reservation    | 0.25   |                                          |
 | Memory reservation | 256M   |                                          |
 
-Overridable via `.ai-team.yaml` `resources.nelson` section (see spec 12).
+Overridable via `.opex.yaml` `resources.nelson` section (see spec 12).
 
 ---
 
@@ -478,7 +478,7 @@ Overridable via `.ai-team.yaml` `resources.nelson` section (see spec 12).
 
 Nelson reads its configuration from multiple sources:
 
-- **`.ai-team.yaml`** (`llm.consensus` section):
+- **`.opex.yaml`** (`llm.consensus` section):
   - `models`: List of LLM providers to use (e.g., `["anthropic/claude-sonnet-4", "openai/gpt-4o", "google/gemini-2.0-flash"]`).
   - `max_rounds`: Default maximum cross-review rounds (default: 3).
 - **Per-request overrides**: Each `ConsensusRequest` can override `max_rounds`, `required_agreement`, and `providers`.

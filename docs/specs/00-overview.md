@@ -38,7 +38,7 @@ graph TB
         TUI["TUI Client<br/>(standalone, runs on host)"]
     end
 
-    subgraph net ["Docker Compose Network (ai-team-net)"]
+    subgraph net ["Docker Compose Network (opex-net)"]
         subgraph always ["Always-running Services"]
             Redis["Redis<br/>(internal)"]
             PostgreSQL["PostgreSQL<br/>(internal)"]
@@ -116,7 +116,7 @@ reference for its domain.
 | 09 | [`09-security.md`](09-security.md) | Secrets, container hardening, filesystem permissions, prompt injection defense. |
 | 10 | [`10-testing.md`](10-testing.md) | Record/replay (VCR), unit/integration/E2E pyramid, CI stages. |
 | 11 | [`11-dev-standards.md`](11-dev-standards.md) | ruff + mypy strict + 90% coverage, coding conventions, CI pipeline. |
-| 12 | [`12-repo-connection.md`](12-repo-connection.md) | GitHub App + PAT auth, cloning, webhooks, `.ai-team.yaml` full spec. |
+| 12 | [`12-repo-connection.md`](12-repo-connection.md) | GitHub App + PAT auth, cloning, webhooks, `.opex.yaml` full spec. |
 | 13 | [`13-orchestrator.md`](13-orchestrator.md) | Pipeline orchestrator: event router, container launcher, watchdog, dependency dispatch. |
 | 14 | [`14-api-server.md`](14-api-server.md) | REST + SSE API for TUI client, authentication, endpoints. |
 | 15 | [`15-tui.md`](15-tui.md) | TUI (Textual) with pipeline, task, log, consensus, and cost views. |
@@ -151,12 +151,12 @@ reference for its domain.
 
 ## 7. Project Structure
 
-All packages use the `ai_team` **namespace package** (PEP 420). Each workspace member
-contains an `ai_team/` directory with **no `__init__.py`** — Python merges them at runtime.
+All packages use the `opex` **namespace package** (PEP 420). Each workspace member
+contains an `opex/` directory with **no `__init__.py`** — Python merges them at runtime.
 Tests are colocated with each package. Integration tests live at the top level.
 
 ```
-ai-team/
+opex/
 ├── PLAN.md
 ├── Makefile
 ├── docker-compose.yml
@@ -164,15 +164,15 @@ ai-team/
 ├── uv.lock
 │
 ├── core/                              # Shared library
-│   ├── pyproject.toml                 # name = "ai-team-core"
-│   ├── ai_team/                       # Namespace package (no __init__.py)
+│   ├── pyproject.toml                 # name = "opex-core"
+│   ├── opex/                       # Namespace package (no __init__.py)
 │   │   └── core/
 │   │       ├── __init__.py
 │   │       ├── models/
 │   │       │   ├── __init__.py
 │   │       │   ├── task.py            # Task, ExecutionPlan, DependencyGraph
 │   │       │   ├── review.py          # ReviewResult, HumanReviewScore
-│   │       │   └── config.py          # .ai-team.yaml schema
+│   │       │   └── config.py          # .opex.yaml schema
 │   │       ├── queue/
 │   │       │   ├── __init__.py
 │   │       │   └── redis.py           # Redis Streams abstraction
@@ -203,9 +203,9 @@ ai-team/
 │       └── test_migrations.py
 │
 ├── orchestrator/                      # Pipeline orchestrator (always-running)
-│   ├── pyproject.toml                 # name = "ai-team-orchestrator"
+│   ├── pyproject.toml                 # name = "opex-orchestrator"
 │   ├── Dockerfile
-│   ├── ai_team/                       # Namespace package (no __init__.py)
+│   ├── opex/                       # Namespace package (no __init__.py)
 │   │   └── orchestrator/
 │   │       ├── __init__.py
 │   │       ├── main.py               # Entry point, event loop
@@ -223,9 +223,9 @@ ai-team/
 │       └── test_graph.py
 │
 ├── api/                               # REST + SSE API server (always-running)
-│   ├── pyproject.toml                 # name = "ai-team-api"
+│   ├── pyproject.toml                 # name = "opex-api"
 │   ├── Dockerfile
-│   ├── ai_team/                       # Namespace package (no __init__.py)
+│   ├── opex/                       # Namespace package (no __init__.py)
 │   │   └── api/
 │   │       ├── __init__.py
 │   │       ├── main.py               # FastAPI app
@@ -244,8 +244,8 @@ ai-team/
 │       └── test_auth.py
 │
 ├── tui/                               # Interactive TUI client (runs on host)
-│   ├── pyproject.toml                 # name = "ai-team-tui" (pip-installable, no Dockerfile)
-│   ├── ai_team/                       # Namespace package (no __init__.py)
+│   ├── pyproject.toml                 # name = "opex-tui" (pip-installable, no Dockerfile)
+│   ├── opex/                       # Namespace package (no __init__.py)
 │   │   └── tui/
 │   │       ├── __init__.py
 │   │       ├── app.py                # Textual app entry point
@@ -274,9 +274,9 @@ ai-team/
 │
 ├── agents/                            # Ephemeral agent packages
 │   ├── nelson/
-│   │   ├── pyproject.toml             # name = "ai-team-nelson"
+│   │   ├── pyproject.toml             # name = "opex-nelson"
 │   │   ├── Dockerfile
-│   │   ├── ai_team/                   # Namespace package (no __init__.py)
+│   │   ├── opex/                   # Namespace package (no __init__.py)
 │   │   │   └── nelson/
 │   │   │       ├── __init__.py
 │   │   │       └── agent.py           # Consensus loop orchestration
@@ -286,7 +286,7 @@ ai-team/
 │   ├── julius/
 │   │   ├── pyproject.toml
 │   │   ├── Dockerfile
-│   │   ├── ai_team/
+│   │   ├── opex/
 │   │   │   └── julius/
 │   │   │       ├── __init__.py
 │   │   │       └── agent.py           # Task decomposition + dependency graph
@@ -296,7 +296,7 @@ ai-team/
 │   ├── sherlock/
 │   │   ├── pyproject.toml
 │   │   ├── Dockerfile
-│   │   ├── ai_team/
+│   │   ├── opex/
 │   │   │   └── sherlock/
 │   │   │       ├── __init__.py
 │   │   │       └── agent.py           # Codebase analysis + execution planning
@@ -306,7 +306,7 @@ ai-team/
 │   ├── leonard/
 │   │   ├── pyproject.toml
 │   │   ├── Dockerfile
-│   │   ├── ai_team/
+│   │   ├── opex/
 │   │   │   └── leonard/
 │   │   │       ├── __init__.py
 │   │   │       └── agent.py           # Implementation + testing + validation
@@ -316,7 +316,7 @@ ai-team/
 │   ├── katherine/
 │   │   ├── pyproject.toml
 │   │   ├── Dockerfile
-│   │   ├── ai_team/
+│   │   ├── opex/
 │   │   │   └── katherine/
 │   │   │       ├── __init__.py
 │   │   │       └── agent.py           # Code review + human review scoring
@@ -326,7 +326,7 @@ ai-team/
 │   └── richelieu/
 │       ├── pyproject.toml
 │       ├── Dockerfile
-│       ├── ai_team/
+│       ├── opex/
 │       │   └── richelieu/
 │       │       ├── __init__.py
 │       │       └── agent.py           # Git/workspace management
@@ -344,13 +344,13 @@ ai-team/
 
 ---
 
-## 8. `.ai-team.yaml` Specification
+## 8. `.opex.yaml` Specification
 
 This file lives in the root of any target repository and tells the agents how to work
 with that codebase. See [spec 12](12-repo-connection.md) for the full connection and configuration details.
 
 ```yaml
-# .ai-team.yaml
+# .opex.yaml
 version: "1"
 
 project:
@@ -389,7 +389,7 @@ guidelines:
 # Branches
 git:
   default_branch: "main"
-  branch_prefix: "ai-team/"          # All AI-created branches use this prefix
+  branch_prefix: "opex/"          # All AI-created branches use this prefix
   require_pr: true
   auto_merge: false                   # Even if Katherine approves, don't auto-merge
 
@@ -433,7 +433,7 @@ review:
 - [ ] Implement full LiteLLM + OpenRouter client wrapper (`core/llm/client.py`).
 - [ ] Implement structlog configuration (`core/logging/`).
 - [ ] Define Pydantic models for tasks, reviews, configs (`core/models/`).
-- [ ] Parse `.ai-team.yaml` into typed config.
+- [ ] Parse `.opex.yaml` into typed config.
 - [ ] Set up Docker Compose (Redis, PostgreSQL, Loki, Grafana).
 - [ ] Set up Makefile (build, test, up, down, logs).
 - [ ] Set up pytest with basic test infrastructure.
@@ -498,7 +498,7 @@ review:
 
 - [ ] Implement targeted codebase reading (files, functions, patterns).
 - [ ] Implement mini execution plan generation.
-- [ ] Integrate with `.ai-team.yaml` guidelines.
+- [ ] Integrate with `.opex.yaml` guidelines.
 - [ ] Integrate Nelson for ambiguous approach resolution.
 - [ ] Write tests with sample tasks and expected execution plans.
 - [ ] Dockerize Sherlock.
@@ -507,7 +507,7 @@ review:
 > The coding agent. Most complex, most risk.
 
 - [ ] Implement code generation from mini execution plan.
-- [ ] Implement test execution (run commands from `.ai-team.yaml`).
+- [ ] Implement test execution (run commands from `.opex.yaml`).
 - [ ] Implement lint/format execution.
 - [ ] Implement validation against acceptance criteria.
 - [ ] Implement retry logic (max N attempts).
@@ -553,7 +553,7 @@ review:
 - [ ] Implement real-time log viewer with filtering.
 - [ ] Implement SSE-backed live update widgets.
 - [ ] Build custom widgets (agent status, dep graph, cost bar, log panel).
-- [ ] Make pip-installable (`pip install ai-team-tui`).
+- [ ] Make pip-installable (`pip install opex-tui`).
 
 ### Phase 10 -- End-to-End Integration (Week 15-16)
 > Wire everything together and prove it works.
@@ -572,12 +572,12 @@ review:
 - [ ] Retry / circuit breaker for external API calls.
 - [ ] Graceful shutdown handling for all agents.
 - [ ] Documentation (setup guide, architecture overview, config reference).
-- [ ] CI pipeline for the ai-team repo itself.
+- [ ] CI pipeline for the opex repo itself.
 - [ ] Security review (secrets handling, container permissions).
 
 ### Dog-fooding
 
-Once stable, prove the system by rebuilding ai-team in a fresh repo using this
+Once stable, prove the system by rebuilding opex in a fresh repo using this
 documentation as input. This tests the full pipeline on a real complex project
 and validates documentation quality.
 
@@ -602,9 +602,9 @@ and validates documentation quality.
 | Human review scoring | Nelson consensus (all 3 LLMs score it) | Same rigor as code review. Scores novelty, complexity, risk, AI confidence. |
 | Human review | Adaptive threshold learning | Starts conservative, learns the team's standards from human feedback. |
 | GitHub auth | GitHub App + PAT fallback | GitHub App for orgs (auto-refresh), PAT for personal repos. |
-| Project config | `.ai-team.yaml` per repo | Clean interface between the agent system and any target codebase. |
+| Project config | `.opex.yaml` per repo | Clean interface between the agent system and any target codebase. |
 | Package management | uv workspaces | Fast, modern Python tooling. Workspace support for monorepo. |
-| Package namespace | `ai_team.*` (PEP 420 namespace packages) | Unified imports: `ai_team.core`, `ai_team.orchestrator`, `ai_team.nelson`, etc. Flat layout (no `src/`). |
+| Package namespace | `opex.*` (PEP 420 namespace packages) | Unified imports: `opex.core`, `opex.orchestrator`, `opex.nelson`, etc. Flat layout (no `src/`). |
 | Client architecture | API Server (Docker) + TUI (host) | API is the sole external interface. TUI is a standalone pip-installable Textual app, connects via REST + SSE. |
 | Filesystem access | All agents read repo, only Leonard + Richelieu write | Everyone can analyze the codebase. Write permissions are restricted. |
 | Observability UI | TUI (Textual) + Grafana/Loki | TUI for real-time, Grafana for historical log querying and dashboards. |
@@ -616,7 +616,7 @@ and validates documentation quality.
 | Secrets | .env files (gitignored) | Simple, no infrastructure overhead. Single OPENROUTER_API_KEY instead of multiple provider keys. Per-agent secret scoping. |
 | Deployment | Docker Compose + Makefile | Makefile for dev workflow, Compose for service orchestration. |
 | Log aggregation | Grafana + Loki | Docker logging driver ships all logs to Loki. Zero-config per agent. |
-| LLM config | .ai-team.yaml (not env vars) | Target repo owner decides model preferences. Secrets (.env) separate from config. |
+| LLM config | .opex.yaml (not env vars) | Target repo owner decides model preferences. Secrets (.env) separate from config. |
 | Health checks | Redis heartbeats | No HTTP servers in agents. Orchestrator watchdog monitors heartbeats. |
 | DB migrations | Numbered SQL files + runner | Simple, no heavy deps (no Alembic). Works with asyncpg. |
-| Dog-fooding | Once stable | Prove the system by rebuilding ai-team in a fresh repo using the documentation as input. |
+| Dog-fooding | Once stable | Prove the system by rebuilding opex in a fresh repo using the documentation as input. |

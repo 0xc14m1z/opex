@@ -4,8 +4,8 @@
 
 ## Overview
 
-The ai-team system connects to a target repository to work on it. The connection involves
-cloning the repo, reading its `.ai-team.yaml` configuration, and setting up webhooks
+The opex system connects to a target repository to work on it. The connection involves
+cloning the repo, reading its `.opex.yaml` configuration, and setting up webhooks
 for automated task intake from GitHub Issues.
 
 ---
@@ -17,7 +17,7 @@ flowchart TD
     Start["User runs: make connect REPO=https://github.com/org/my-app"] --> A
     A["1. Authenticate with GitHub\n- Try GitHub App installation first\n- Fall back to PAT if no App"] --> B
     B["2. Clone repo into /workspace volume\n- Shallow clone (--depth=1) for speed\n- Full fetch if history needed later"] --> C
-    C["3. Read .ai-team.yaml\n- Validate against Pydantic schema\n- Error if missing or invalid"] --> D
+    C["3. Read .opex.yaml\n- Validate against Pydantic schema\n- Error if missing or invalid"] --> D
     D["4. Register webhook (if GitHub App)\n- Listen for: issues.opened,\nissues.labeled, issue_comment,\npull_request.review_submitted"] --> E
     E["5. Store connection in PostgreSQL\n- Repo URL, auth method, branch,\nconfig hash, connection timestamp"] --> F
     F["6. Validate environment\n- Run commands.install from config\n- Run commands.test to verify setup\n- Report any failures"]
@@ -29,7 +29,7 @@ flowchart TD
 
 A GitHub App is the preferred authentication method for organizations:
 
-- **Installation**: The org admin installs the ai-team GitHub App on specific repos.
+- **Installation**: The org admin installs the opex GitHub App on specific repos.
 - **Permissions required**:
   - `contents: write` — clone, push branches.
   - `pull_requests: write` — create/update PRs.
@@ -62,7 +62,7 @@ def get_auth(repo_url: str) -> GitHubAuth:
     raise AuthError("No GitHub credentials configured")
 ```
 
-## `.ai-team.yaml` — Full Specification
+## `.opex.yaml` — Full Specification
 
 ```yaml
 version: "1"
@@ -116,7 +116,7 @@ protected_paths:
 # Git configuration
 git:
   default_branch: "main"
-  branch_prefix: "ai-team/"              # All AI branches: ai-team/feature-name
+  branch_prefix: "opex/"              # All AI branches: opex/feature-name
   require_pr: true                        # Always create PRs, never push to default
   auto_merge: false                       # Even if approved, wait for human merge
   conventional_commits: true              # Enforce conventional commit format
@@ -136,10 +136,10 @@ review:
 # Task intake — how issues become tasks
 intake:
   labels:
-    trigger: "ai-team"                    # Issues with this label get picked up
-    in_progress: "ai-team:working"        # Applied when agents start working
-    done: "ai-team:done"                  # Applied when PR is created
-    needs_human: "ai-team:needs-human"    # Applied when agents need help
+    trigger: "opex"                    # Issues with this label get picked up
+    in_progress: "opex:working"        # Applied when agents start working
+    done: "opex:done"                  # Applied when PR is created
+    needs_human: "opex:needs-human"    # Applied when agents need help
   issue_template: |                       # Optional: expected format for issues
     ## Description
     [What should be built or fixed]
@@ -195,7 +195,7 @@ pipelines, providing a warm cache for subsequent operations.
 
 ### Lifecycle
 
-1. **`make connect REPO=<url>`** — Clones the target repo into the `ai-team-repo`
+1. **`make connect REPO=<url>`** — Clones the target repo into the `opex-repo`
    volume. This is a one-time setup operation. The clone persists across pipelines
    (warm cache).
 
@@ -215,8 +215,8 @@ The repo volume is mounted at `/workspace` inside all agent containers:
 
 | Volume               | Mount Path    | Access                                        |
 |----------------------|---------------|-----------------------------------------------|
-| `ai-team-repo`      | `/workspace`  | All agents (RO), Richelieu + Leonard (RW)     |
-| `ai-team-worktrees` | `/workspace/.worktrees` | Leonard (own worktree RW), Richelieu (RW), others (RO) |
+| `opex-repo`      | `/workspace`  | All agents (RO), Richelieu + Leonard (RW)     |
+| `opex-worktrees` | `/workspace/.worktrees` | Leonard (own worktree RW), Richelieu (RW), others (RO) |
 
 See spec 05 for the full Docker Compose volume definitions and filesystem
 access rules.
@@ -257,6 +257,6 @@ make disconnect REPO=https://github.com/org/my-app
 
 - **Spec 05** (Infrastructure): Docker Compose volumes, filesystem access rules, `make connect` target.
 - **Spec 06** (Orchestrator): Pipeline creation triggers Richelieu for `git fetch`.
-- **Spec 16** (Cost Tracking): `.ai-team.yaml` `budget:` section for per-project limits.
-- **Spec 18** (Security): `.ai-team.yaml` `secrets:` section, GitHub App and PAT credential management.
-- **Spec 19** (Testing): `.ai-team.yaml` config parsing tests, test repo fixture.
+- **Spec 16** (Cost Tracking): `.opex.yaml` `budget:` section for per-project limits.
+- **Spec 18** (Security): `.opex.yaml` `secrets:` section, GitHub App and PAT credential management.
+- **Spec 19** (Testing): `.opex.yaml` config parsing tests, test repo fixture.

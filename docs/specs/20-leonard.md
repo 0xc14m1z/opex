@@ -20,8 +20,8 @@ by Richelieu.
 
 - Receive an execution plan from Sherlock and a worktree from Richelieu.
 - Implement code changes following Sherlock's step-by-step plan.
-- Run the test suite (commands from `.ai-team.yaml`).
-- Run linting and formatting (commands from `.ai-team.yaml`).
+- Run the test suite (commands from `.opex.yaml`).
+- Run linting and formatting (commands from `.opex.yaml`).
 - Validate output against the acceptance criteria from the execution plan.
 - Run a code simplification pass (reduce unnecessary complexity).
 - Commit changes with conventional commit messages.
@@ -65,8 +65,8 @@ When learning mode is active (see spec 03):
 - **Data available**:
   - Sherlock's mini execution plan (from `task_enriched` in Redis/PostgreSQL).
   - Worktree at `WORKTREE_PATH` (read/write access to this path only).
-  - `.ai-team.yaml` configuration (parsed).
-  - Implementation principles from `.ai-team/principles/implementation/` (included in execution plan by Sherlock).
+  - `.opex.yaml` configuration (parsed).
+  - Implementation principles from `.opex/principles/implementation/` (included in execution plan by Sherlock).
   - Katherine's feedback (if rework iteration).
 
 ### Output
@@ -87,7 +87,7 @@ When learning mode is active (see spec 03):
    - Write or modify the specified files.
    - Follow codebase conventions noted by Sherlock.
 4. **Run tests**:
-   - Execute the test command from `.ai-team.yaml` (`commands.test`).
+   - Execute the test command from `.opex.yaml` (`commands.test`).
    - If tests fail: analyze failures, fix the code, re-run (up to N attempts).
 5. **Run linting and formatting**:
    - Execute lint command (`commands.lint`).
@@ -195,7 +195,7 @@ Leonard's access is restricted to prevent unintended side effects:
 Leonard has the highest resource profile because it runs arbitrary code (test
 suites, linters, formatters) inside its container.
 
-Overridable via `.ai-team.yaml` `resources.leonard` section (see spec 12). For
+Overridable via `.opex.yaml` `resources.leonard` section (see spec 12). For
 projects with heavy test suites, the repo owner can increase limits:
 
 ```yaml
@@ -209,9 +209,9 @@ resources:
 
 ## Configuration
 
-- **`.ai-team.yaml`**: Commands (test, lint, format, type_check, install), guidelines, knowledge references, resource overrides.
+- **`.opex.yaml`**: Commands (test, lint, format, type_check, install), guidelines, knowledge references, resource overrides.
 - **Environment variables**: `PIPELINE_ID`, `TASK_ID`, `WORKTREE_PATH`, `BRANCH_NAME`, `OPENROUTER_API_KEY`, `DATABASE_URL`, `REDIS_URL`.
-- **LLM model**: Uses `llm.default_model` from `.ai-team.yaml` (or per-agent override `llm.overrides.leonard`).
+- **LLM model**: Uses `llm.default_model` from `.opex.yaml` (or per-agent override `llm.overrides.leonard`).
 - **Retry limit**: Configurable max attempts for test/lint failures (default: 3).
 
 ---

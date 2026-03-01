@@ -71,7 +71,7 @@ Richelieu implements each operation.
 ### Operation: `create_feature_branch`
 
 1. Run `git fetch origin` to pull latest state.
-2. Create feature branch from `origin/{default_branch}` (default branch from `.ai-team.yaml`).
+2. Create feature branch from `origin/{default_branch}` (default branch from `.opex.yaml`).
 3. Branch naming: `feature/{feature-name}` (derived from the plan/pipeline name).
 4. Push the feature branch to GitHub.
 5. Publish `git_response` with branch name.
@@ -80,7 +80,7 @@ Richelieu implements each operation.
 
 1. Create a worktree at `/workspace/.worktrees/{feature}--{task_id}/`.
 2. Create a task branch from the feature branch HEAD.
-3. Branch naming: `ai-team/{feature-name}/{task-id}`.
+3. Branch naming: `opex/{feature-name}/{task-id}`.
 4. Push the task branch to GitHub.
 5. Publish `git_response` with worktree path and branch name.
 
@@ -101,14 +101,14 @@ Richelieu implements each operation.
 
 1. Open a GitHub PR from the task branch targeting the feature branch.
 2. Include task description, execution plan summary, and acceptance criteria in PR body.
-3. Apply labels: `ai-team`, and `learning-mode` if learning mode is active.
+3. Apply labels: `opex`, and `learning-mode` if learning mode is active.
 4. Publish `git_response` with PR URL and number.
 
 ### Operation: `open_feature_pr`
 
 1. Open a GitHub PR from the feature branch targeting the default branch.
 2. Include: task summaries, review scores, cost summary, human review recommendations.
-3. Apply labels: `ai-team`, `needs-human-review` if any task was flagged.
+3. Apply labels: `opex`, `needs-human-review` if any task was flagged.
 4. Publish `git_response` with PR URL and number.
 
 ### Operation: `rebase_branch`
@@ -145,13 +145,13 @@ main -------------------------------------------------------
   |                              |
   +-- feature/add-auth           +-- feature/fix-perf
         |                              |
-        +-- ai-team/add-auth/task-1    +-- ai-team/fix-perf/task-4
+        +-- opex/add-auth/task-1    +-- opex/fix-perf/task-4
         |     PR #101 -> feature       |     PR #104 -> feature
         |                              |
-        +-- ai-team/add-auth/task-2    +-- ai-team/fix-perf/task-5
+        +-- opex/add-auth/task-2    +-- opex/fix-perf/task-5
         |     PR #102 -> feature       |     PR #105 -> feature
         |
-        +-- ai-team/add-auth/task-3
+        +-- opex/add-auth/task-3
               PR #103 -> feature
               (depends on task-1)
 
@@ -164,9 +164,9 @@ All task PRs merged -> PR #107: feature/fix-perf -> main
 ```
 /workspace/                              # Main clone, checked out on default branch
 /workspace/.worktrees/
-  add-auth--task-1/                      # Worktree on ai-team/add-auth/task-1
-  add-auth--task-2/                      # Worktree on ai-team/add-auth/task-2
-  fix-perf--task-4/                      # Worktree on ai-team/fix-perf/task-4
+  add-auth--task-1/                      # Worktree on opex/add-auth/task-1
+  add-auth--task-2/                      # Worktree on opex/add-auth/task-2
+  fix-perf--task-4/                      # Worktree on opex/fix-perf/task-4
 ```
 
 ### Branching Rules
@@ -222,10 +222,10 @@ Katherine re-reviews if the rebase changed code (not just a clean fast-forward).
 ## Principles Integration
 
 Richelieu does not apply implementation or review principles directly. However,
-it follows git conventions configured in `.ai-team.yaml` under the `git:` section:
+it follows git conventions configured in `.opex.yaml` under the `git:` section:
 
 - `default_branch`: Which branch to target for feature PRs.
-- `branch_prefix`: Prefix for all AI-created branches (default: `ai-team/`).
+- `branch_prefix`: Prefix for all AI-created branches (default: `opex/`).
 - `require_pr`: Whether PRs are required (always true in practice).
 - `auto_merge`: Whether to auto-merge feature PRs when Katherine approves all tasks.
 
@@ -238,7 +238,7 @@ All destructive git operations are guarded:
 - **Force push**: Only on AI-owned task branches (never on feature branches or default branch).
 - **Branch delete**: Only for task branches after PR is merged/closed. Feature branches are preserved until the feature PR is merged.
 - **Rebase**: Only on AI-owned task branches. Never rebase feature branches or the default branch.
-- **Confirmation**: Configurable safeguards in `.ai-team.yaml` can require human confirmation for specific operations.
+- **Confirmation**: Configurable safeguards in `.opex.yaml` can require human confirmation for specific operations.
 
 ---
 
@@ -282,13 +282,13 @@ Expected tools:
 | CPU reservation    | 0.25   |                                          |
 | Memory reservation | 128M   |                                          |
 
-Overridable via `.ai-team.yaml` `resources.richelieu` section (see spec 12).
+Overridable via `.opex.yaml` `resources.richelieu` section (see spec 12).
 
 ---
 
 ## Configuration
 
-- **`.ai-team.yaml`** (`git:` section): `default_branch`, `branch_prefix`, `require_pr`, `auto_merge`.
+- **`.opex.yaml`** (`git:` section): `default_branch`, `branch_prefix`, `require_pr`, `auto_merge`.
 - **Environment variables**: `PIPELINE_ID`, `TASK_ID`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH`, `GITHUB_WEBHOOK_SECRET`, `REDIS_URL`, `DATABASE_URL`.
 - **GitHub authentication**: GitHub App (preferred for orgs, auto-refresh tokens) or PAT fallback (for personal repos). See spec 12 for auth details.
 

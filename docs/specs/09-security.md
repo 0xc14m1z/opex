@@ -225,12 +225,12 @@ No agent receives secrets it doesn't need. In particular:
 - If an agent doesn't call LLMs directly (communicates with Nelson via Redis
   instead), it can be removed from the `OPENROUTER_API_KEY` list.
 
-### `.ai-team.yaml` overrides
+### `.opex.yaml` overrides
 
 The target repo owner can extend (but not reduce) the allowlists:
 
 ```yaml
-# .ai-team.yaml
+# .opex.yaml
 secrets:
   leonard:
     additional:
@@ -382,4 +382,4 @@ suggestions for monitoring security-relevant activity.
 - **Spec 16** (Cost Tracking): Budget limits as financial damage mitigation.
 - **Spec 17** (Error Recovery): Container crash handling, retry limits.
 - **Spec 20** (Development Standards): `uv audit` for dependency scanning.
-- **Spec 21** (Repo Connection): `.ai-team.yaml` `secrets:` section for extending allowlists.
+- **Spec 21** (Repo Connection): `.opex.yaml` `secrets:` section for extending allowlists.

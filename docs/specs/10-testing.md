@@ -189,11 +189,11 @@ def state_store(database_url):
 
 @pytest.fixture
 def test_repo(tmp_path):
-    """Creates a temporary git repo with a .ai-team.yaml."""
+    """Creates a temporary git repo with a .opex.yaml."""
     repo_path = tmp_path / "test-repo"
     repo_path.mkdir()
     subprocess.run(["git", "init"], cwd=repo_path, check=True)
-    (repo_path / ".ai-team.yaml").write_text(TEST_CONFIG_YAML)
+    (repo_path / ".opex.yaml").write_text(TEST_CONFIG_YAML)
     (repo_path / "src").mkdir()
     (repo_path / "src" / "main.py").write_text("def hello(): return 'world'")
     subprocess.run(["git", "add", "."], cwd=repo_path, check=True)
@@ -217,7 +217,7 @@ cost amortized while maintaining isolation.
 | Dependency graph | Task ordering, parallel group detection, cycle detection |
 | Message serialization | Pydantic model -> Redis -> Pydantic round-trip (real Redis) |
 | Checkpoint logic | Save, load, resume-from-checkpoint (real PostgreSQL) |
-| Config parsing | `.ai-team.yaml` validation, defaults, error messages |
+| Config parsing | `.opex.yaml` validation, defaults, error messages |
 | Retry logic | Counter, max retries, escalation decision |
 
 Even "unit" tests use real Redis and real PostgreSQL via testcontainers. There is no
@@ -295,7 +295,7 @@ class TestCheckpoint:
 | Checkpoint save/resume | Agent + PostgreSQL + Redis |
 | Cost tracking accumulation | LLM calls (VCR) + PostgreSQL + budget checking |
 | Git operations | Richelieu + test git repo |
-| Config loading | `.ai-team.yaml` parsing from a test repo |
+| Config loading | `.opex.yaml` parsing from a test repo |
 | Orchestrator launches agents | Orchestrator + Docker SDK (Docker-in-Docker) |
 
 ### Integration Test Infrastructure
@@ -354,7 +354,7 @@ to run repeatedly.
 
 A dedicated test repository with:
 - Simple Python project (FastAPI app).
-- Known `.ai-team.yaml` configuration.
+- Known `.opex.yaml` configuration.
 - Pre-written issues that exercise different agent capabilities.
 - Expected outcomes documented for each test case.
 
@@ -362,7 +362,7 @@ A dedicated test repository with:
 tests/
   e2e/
     test_repo/                  # The test target repo
-      .ai-team.yaml
+      .opex.yaml
       src/
       tests/
     scenarios/
@@ -497,4 +497,4 @@ real interactions — not a mock.
 - **Spec 16** (Cost Tracking): Cost calculation tests, budget enforcement tests.
 - **Spec 17** (Error Recovery): Checkpoint save/resume tests, retry logic tests.
 - **Spec 20** (Development Standards): Coverage targets (90%+), CI pipeline configuration.
-- **Spec 21** (Repo Connection): `.ai-team.yaml` parsing tests, test repo fixture.
+- **Spec 21** (Repo Connection): `.opex.yaml` parsing tests, test repo fixture.
