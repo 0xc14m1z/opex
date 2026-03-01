@@ -86,27 +86,40 @@ stateDiagram-v2
 ### Branching structure
 
 ```mermaid
-flowchart TD
-    main[main]
+sequenceDiagram
+    participant M as main
+    participant FA as feature/add-auth
+    participant T1 as opex/.../task-1
+    participant T2 as opex/.../task-2
+    participant T3 as opex/.../task-3
+    participant FB as feature/fix-perf
+    participant T4 as opex/.../task-4
+    participant T5 as opex/.../task-5
 
-    main --> FA[feature/add-auth]
-    main --> FB[feature/fix-perf]
+    Note over M,T5: Feature A and Feature B run independently
 
-    FA --> T1["opex/add-auth/task-1\nPR #101 -> feature/add-auth"]
-    FA --> T2["opex/add-auth/task-2\nPR #102 -> feature/add-auth"]
-    FA --> T3["opex/add-auth/task-3\nPR #103 -> feature/add-auth\n(depends on task-1, branches\nAFTER PR #101 merges)"]
+    M->>FA: create feature branch
+    M->>FB: create feature branch
 
-    FB --> T4["opex/fix-perf/task-4\nPR #104 -> feature/fix-perf"]
-    FB --> T5["opex/fix-perf/task-5\nPR #105 -> feature/fix-perf"]
+    par Independent tasks launch in parallel
+        FA->>T1: fork task branch
+        FA->>T2: fork task branch
+        FB->>T4: fork task branch
+        FB->>T5: fork task branch
+    end
 
-    FA -->|"All task PRs merged"| PR106["PR #106: feature/add-auth -> main"]
-    FB -->|"All task PRs merged"| PR107["PR #107: feature/fix-perf -> main"]
+    T1-->>FA: PR #101 merged
 
-    Note1["Feature A"] -.- FA
-    Note2["Feature B (parallel, independent)"] -.- FB
+    Note over FA,T3: task-3 depends on task-1 —<br/>branches AFTER PR #101 merges
+    FA->>T3: fork task branch
 
-    style Note1 fill:none,stroke:none
-    style Note2 fill:none,stroke:none
+    T2-->>FA: PR #102 merged
+    T4-->>FB: PR #104 merged
+    T5-->>FB: PR #105 merged
+    T3-->>FA: PR #103 merged
+
+    FA-->>M: PR #106: feature/add-auth → main
+    FB-->>M: PR #107: feature/fix-perf → main
 ```
 
 ### Branching rules
