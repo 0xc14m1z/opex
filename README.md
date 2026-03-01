@@ -43,16 +43,16 @@ Every failure escalates to a human with full context — the system never silent
 ┌──────────────────────────────────────────────────────────────┐
 │  Docker Compose Network                                      │
 │                                                              │
-│  ┌───────────┐  ┌────────────┐  ┌────────┐  ┌────────────┐  │
-│  │   Redis   │  │ PostgreSQL │  │  Loki  │  │  Grafana   │  │
-│  │ (streams) │  │  (state)   │  │ (logs) │  │  (:3000)   │  │
-│  └─────┬─────┘  └──────┬─────┘  └───┬────┘  └────────────┘  │
+│  ┌───────────┐  ┌────────────┐  ┌────────┐  ┌────────────┐   │
+│  │   Redis   │  │ PostgreSQL │  │  Loki  │  │  Grafana   │   │
+│  │ (streams) │  │  (state)   │  │ (logs) │  │  (:3000)   │   │
+│  └─────┬─────┘  └──────┬─────┘  └───┬────┘  └────────────┘   │
 │        │               │            │                        │
 │  ┌─────┴───────────────┴────────────┴─────┐                  │
 │  │            Orchestrator                │                  │
 │  │      (event router + launcher)         │                  │
 │  └─────────────────┬──────────────────────┘                  │
-│                    │ spawns ephemeral containers              │
+│                    │ spawns ephemeral containers             │
 │  ┌─────────────────┼──────────────────────────────┐          │
 │  │  Nelson   Julius   Sherlock   Leonard   ...    │          │
 │  │  Katherine   Richelieu                         │          │
