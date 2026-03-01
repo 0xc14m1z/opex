@@ -50,6 +50,15 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"          # Cancelled by human
     NEEDS_HUMAN = "needs_human"      # Escalated, waiting for human
 
+class PipelineStatus(StrEnum):
+    CREATED = "created"              # Plan received, not yet started
+    DECOMPOSING = "decomposing"      # Julius is running
+    IN_PROGRESS = "in_progress"      # Tasks are being processed
+    COMPLETING = "completing"        # All tasks done, opening PR
+    COMPLETED = "completed"          # PR opened
+    FAILED = "failed"                # Unrecoverable failure
+    CANCELLED = "cancelled"          # Cancelled by human
+
 class Priority(StrEnum):
     LOW = "low"
     NORMAL = "normal"
@@ -116,6 +125,15 @@ class BudgetConfig(BaseModel):
     soft_limit_per_task: float = 5.0
     hard_limit_per_task: float = 20.0
 
+class LLMConsensusConfig(BaseModel):
+    models: list[str]                          # At least 2 for meaningful consensus
+    max_rounds: int = 3
+
+class LLMConfig(BaseModel):
+    default_model: str = "anthropic/claude-sonnet-4"
+    consensus: LLMConsensusConfig
+    overrides: dict[AgentName, str] = {}       # agent → model ID
+
 class AiTeamConfig(BaseModel):
     """Root model for .ai-team.yaml."""
     version: str
@@ -128,6 +146,7 @@ class AiTeamConfig(BaseModel):
     review: ReviewConfig = ReviewConfig()
     intake: IntakeConfig = IntakeConfig()
     budget: BudgetConfig = BudgetConfig()
+    llm: LLMConfig                             # Model selection config
 ```
 
 ## Task Models
@@ -439,51 +458,141 @@ class Checkpoint(BaseModel):
     expires_at: datetime
 ```
 
-## SQLite Schema Summary
+## Controller Models
+
+These payload models are used by the pipeline controller (spec 13) and are the
+canonical definitions for controller lifecycle events. All use the standard
+`MessageEnvelope` from spec 10.
+
+```python
+# models/messages.py (controller payloads)
+
+class PipelineCreatedPayload(BaseModel):
+    """Published by the TUI/CLI when a human starts a new pipeline."""
+    pipeline_id: str
+    plan: str                                # The human's plan text
+    repo_url: str
+    target_branch: str
+    config: AiTeamConfig                     # Parsed .ai-team.yaml
+
+
+class DecompositionCompletePayload(BaseModel):
+    """Published by Julius when it finishes decomposing the plan into tasks."""
+    pipeline_id: str
+    task_count: int
+    dependency_graph: DependencyGraph
+    ready_task_ids: list[str]                # Tasks with no dependencies (can start now)
+
+
+class BatchDispatchedPayload(BaseModel):
+    """Published by the controller when it launches a batch of Sherlocks."""
+    pipeline_id: str
+    task_ids: list[str]                      # Tasks being dispatched in this batch
+    batch_number: int                        # 1-indexed
+    total_tasks: int
+    remaining_tasks: int
+
+
+class AllTasksCompletePayload(BaseModel):
+    """Published by the controller when every task in the pipeline reaches completed."""
+    pipeline_id: str
+    task_count: int
+    total_cost: float
+    elapsed_seconds: float
+
+
+class PipelineCompletedPayload(BaseModel):
+    """Published by the controller after the PR is opened successfully."""
+    pipeline_id: str
+    pr_url: str
+    pr_number: int
+    tasks_completed: int
+    total_cost: float
+    elapsed_seconds: float
+    human_review_needed: bool
+
+
+class PipelineFailedPayload(BaseModel):
+    """Published by the controller when the pipeline cannot continue."""
+    pipeline_id: str
+    reason: str
+    failed_task_id: str | None               # None if pipeline-level failure
+    tasks_completed: int
+    tasks_remaining: int
+    total_cost: float
+    recoverable: bool                        # Can human fix and retry?
+```
+
+## PostgreSQL Schema
 
 ```sql
+-- Schema migrations tracking
+CREATE TABLE schema_migrations (
+    version TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Pipelines
+CREATE TABLE pipelines (
+    id TEXT PRIMARY KEY,                     -- "pipe-{uuid}"
+    plan TEXT NOT NULL,                      -- Original plan text
+    repo_url TEXT NOT NULL,
+    target_branch TEXT NOT NULL,
+    status TEXT NOT NULL,                    -- PipelineStatus enum
+    task_count INTEGER,                      -- Set after decomposition
+    tasks_completed INTEGER DEFAULT 0,
+    pr_url TEXT,                             -- Set when PR is opened
+    total_cost NUMERIC(10,4) DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,                  -- When Julius was launched
+    completed_at TIMESTAMPTZ,
+    error TEXT                               -- Failure reason if failed
+);
+
+CREATE INDEX idx_pipelines_status ON pipelines(status);
+
 -- Tasks
 CREATE TABLE tasks (
     id TEXT PRIMARY KEY,
-    pipeline_id TEXT NOT NULL,
-    data TEXT NOT NULL,                -- JSON (Task model)
+    pipeline_id TEXT NOT NULL REFERENCES pipelines(id),
+    data JSONB NOT NULL,                     -- JSON (Task model)
     status TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Consensus history
 CREATE TABLE consensus_history (
     request_id TEXT PRIMARY KEY,
-    data TEXT NOT NULL,                -- JSON (ConsensusResponse model)
-    created_at TEXT NOT NULL
+    data JSONB NOT NULL,                     -- JSON (ConsensusResponse model)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Provider weights
 CREATE TABLE provider_weights (
     provider TEXT NOT NULL,
     scope TEXT NOT NULL,
-    weight REAL NOT NULL,
+    weight DOUBLE PRECISION NOT NULL,
     sample_count INTEGER NOT NULL,
-    updated_at TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (provider, scope)
 );
 
 -- Cost records
 CREATE TABLE cost_records (
     id TEXT PRIMARY KEY,
-    pipeline_id TEXT NOT NULL,
+    pipeline_id TEXT NOT NULL REFERENCES pipelines(id),
     task_id TEXT,
     agent TEXT NOT NULL,
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
     prompt_tokens INTEGER NOT NULL,
     completion_tokens INTEGER NOT NULL,
-    cost_usd REAL NOT NULL,
+    cost_usd NUMERIC(10,4) NOT NULL,
     purpose TEXT NOT NULL,
     consensus_request_id TEXT,
     consensus_round INTEGER,
-    timestamp TEXT NOT NULL
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Checkpoints
@@ -491,32 +600,32 @@ CREATE TABLE checkpoints (
     id TEXT PRIMARY KEY,
     agent TEXT NOT NULL,
     task_id TEXT NOT NULL,
-    pipeline_id TEXT NOT NULL,
+    pipeline_id TEXT NOT NULL REFERENCES pipelines(id),
     checkpoint_name TEXT NOT NULL,
-    state TEXT NOT NULL,              -- JSON
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
+    state JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
 );
 
 -- Human decisions (for learning)
 CREATE TABLE human_decisions (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
-    pipeline_id TEXT NOT NULL,
+    pipeline_id TEXT NOT NULL REFERENCES pipelines(id),
     decision TEXT NOT NULL,
     was_flagged BOOLEAN NOT NULL,
     katherine_decision TEXT NOT NULL,
     feedback TEXT,
-    decided_at TEXT NOT NULL
+    decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Audit log
 CREATE TABLE audit_log (
     id TEXT PRIMARY KEY,
-    timestamp TEXT NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     agent TEXT NOT NULL,
     event_type TEXT NOT NULL,
-    details TEXT NOT NULL,            -- JSON
+    details JSONB NOT NULL,
     severity TEXT NOT NULL
 );
 
@@ -527,8 +636,22 @@ CREATE TABLE repo_connections (
     auth_method TEXT NOT NULL,
     default_branch TEXT NOT NULL,
     config_hash TEXT NOT NULL,
-    connected_at TEXT NOT NULL,
-    last_synced_at TEXT NOT NULL
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Active containers (managed by the controller)
+CREATE TABLE active_containers (
+    container_id TEXT PRIMARY KEY,
+    agent TEXT NOT NULL,                      -- AgentName
+    pipeline_id TEXT NOT NULL REFERENCES pipelines(id),
+    task_id TEXT,                             -- NULL for Julius (pipeline-level)
+    status TEXT NOT NULL,                     -- "running", "exited", "dead"
+    exit_code INTEGER,                        -- Set on exit
+    retry_count INTEGER DEFAULT 0,
+    launched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_heartbeat TIMESTAMPTZ,
+    exited_at TIMESTAMPTZ
 );
 
 -- Indexes
@@ -540,4 +663,6 @@ CREATE INDEX idx_costs_daily ON cost_records(timestamp);
 CREATE INDEX idx_checkpoints_lookup ON checkpoints(agent, task_id, pipeline_id);
 CREATE INDEX idx_human_decisions_task ON human_decisions(task_id);
 CREATE INDEX idx_audit_timestamp ON audit_log(timestamp);
+CREATE INDEX idx_containers_pipeline ON active_containers(pipeline_id);
+CREATE INDEX idx_containers_status ON active_containers(status);
 ```

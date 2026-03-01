@@ -15,7 +15,7 @@ Agent encounters error
         │
         ▼
 ┌─────────────────────┐
-│ Save checkpoint     │  (current state persisted to SQLite)
+│ Save checkpoint     │  (current state persisted to PostgreSQL)
 │ Log error           │  (full context including traceback)
 │ Notify human (TUI)  │  (banner: "Leonard-1 crashed on task #3")
 └────────┬────────────┘
@@ -74,7 +74,7 @@ Each agent defines its own checkpoints at natural boundaries:
 
 ### Checkpoint Storage
 
-Checkpoints are stored in SQLite:
+Checkpoints are stored in PostgreSQL:
 
 ```python
 class Checkpoint(BaseModel):
@@ -95,9 +95,9 @@ CREATE TABLE checkpoints (
     task_id TEXT NOT NULL,
     pipeline_id TEXT NOT NULL,
     checkpoint_name TEXT NOT NULL,
-    state TEXT NOT NULL,             -- JSON blob
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
+    state JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX idx_checkpoint_lookup
@@ -226,12 +226,13 @@ class Heartbeat(BaseModel):
 
 ### Dead Agent Detection
 
-A watchdog process (part of Richelieu or a dedicated sidecar) monitors heartbeats:
+The controller's watchdog (see spec 13) monitors heartbeats for all ephemeral agent
+containers (Nelson, Julius, Sherlock, Leonard, Katherine, Richelieu):
 
-- If no heartbeat for 90 seconds → agent is presumed dead.
+- If no heartbeat for 90 seconds → agent container is presumed dead.
 - Log `agent_unresponsive` event.
-- Attempt to restart the container.
-- If restart fails, mark the task as stalled and alert human.
+- Respawn the container (same retry logic for all agents).
+- If max retries exceeded, mark the task as stalled and alert human.
 
 ## Pipeline-Level Recovery
 
@@ -249,8 +250,8 @@ If one task in a pipeline fails but others succeed:
 
 If the entire pipeline is unrecoverable:
 
-1. All agents stop work.
-2. Richelieu preserves all branches and worktrees (no cleanup).
+1. Controller stops spawning new agent containers.
+2. All branches and worktrees are preserved (no cleanup).
 3. A summary is posted to the TUI and GitHub issue.
 4. Human can: fix the issue and re-trigger, or abandon the pipeline.
 
@@ -258,9 +259,9 @@ If the entire pipeline is unrecoverable:
 
 ### After Successful Pipeline
 
-1. Richelieu removes all worktrees.
-2. Richelieu deletes merged task branches.
-3. Expired checkpoints are purged from SQLite.
+1. Controller spawns Richelieu to remove all worktrees.
+2. Controller spawns Richelieu to delete merged task branches.
+3. Expired checkpoints are purged from PostgreSQL.
 4. Cost records and logs are retained (never auto-deleted).
 
 ### After Failed Pipeline

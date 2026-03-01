@@ -210,3 +210,16 @@ Agent → (cost event) → Redis Stream "costs" → TUI renders
 The TUI is read-only — it never sends commands to agents through this channel.
 Human input (approve, reject, provide guidance) goes through a separate
 "human-input" Redis Stream that agents listen to.
+
+## Grafana / Loki (Historical Log Querying)
+
+In addition to the TUI's real-time views, **Grafana + Loki** provide historical
+log querying and dashboards. All container logs are shipped to Loki automatically
+via Docker's Loki logging driver (see spec 06).
+
+Grafana complements the TUI:
+- **TUI**: Real-time streaming view, quick task status, human escalation prompts.
+- **Grafana**: Historical querying (LogQL), cross-agent correlation, dashboards,
+  alerting, and long-term trend analysis.
+
+Grafana is accessible at `http://localhost:3000` when the stack is running.

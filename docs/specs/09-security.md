@@ -39,9 +39,8 @@ layer: secrets management, container isolation, filesystem permissions, and API 
 
 | Secret | Env Variable | Scope |
 |---|---|---|
-| Anthropic API key | `ANTHROPIC_API_KEY` | Nelson, + any agent calling LLM directly |
-| OpenAI API key | `OPENAI_API_KEY` | Nelson |
-| Google API key | `GOOGLE_API_KEY` | Nelson |
+| OpenRouter API key | `OPENROUTER_API_KEY` | Nelson, + any agent calling LLM directly |
+| Database URL | `DATABASE_URL` | All agents needing DB access |
 | GitHub PAT | `GITHUB_PAT` | Richelieu |
 | GitHub App private key | Mounted file at `/secrets/github-app.pem` | Richelieu |
 | GitHub App ID | `GITHUB_APP_ID` | Richelieu |
@@ -50,11 +49,12 @@ layer: secrets management, container isolation, filesystem permissions, and API 
 ### Principle of Least Privilege
 
 Not all agents need all secrets:
-- **Nelson**: Needs all LLM provider keys (it calls all three).
+- **Nelson**: Needs `OPENROUTER_API_KEY` (it calls all models for consensus).
 - **Richelieu**: Needs GitHub credentials (it manages git/PRs).
-- **Leonard, Sherlock, Julius, Katherine**: Need only the LLM key for their
-  primary provider (if they make direct calls outside Nelson). Otherwise,
-  they communicate with Nelson via Redis and need no LLM keys.
+- **Leonard, Sherlock, Julius, Katherine**: Need `OPENROUTER_API_KEY` only if
+  they make direct LLM calls outside Nelson. Otherwise, they communicate with
+  Nelson via Redis and need no LLM keys.
+- **All DB-accessing agents**: Need `DATABASE_URL`.
 
 > Implementation: Use multiple `.env` files or Docker Compose `environment:`
 > per service to limit which secrets each container receives.
@@ -65,11 +65,10 @@ structlog is configured with a processor that redacts known secret patterns:
 
 ```python
 REDACT_PATTERNS = [
-    re.compile(r"sk-ant-[a-zA-Z0-9-]+"),      # Anthropic
-    re.compile(r"sk-[a-zA-Z0-9]+"),             # OpenAI
-    re.compile(r"AIza[a-zA-Z0-9-_]+"),          # Google
+    re.compile(r"sk-or-[a-zA-Z0-9-]+"),        # OpenRouter
     re.compile(r"ghp_[a-zA-Z0-9]+"),            # GitHub PAT
     re.compile(r"ghs_[a-zA-Z0-9]+"),            # GitHub App token
+    re.compile(r"postgresql://[^\s]+"),          # PostgreSQL connection string
 ]
 
 def redact_secrets(_, __, event_dict: dict) -> dict:
@@ -124,7 +123,7 @@ services:
 - No `--privileged` flag.
 - No host network mode.
 - No host PID namespace.
-- No Docker socket mount (except for the Leonard spawner, if dynamic scaling is used —
+- No Docker socket mount (except for the controller, if dynamic scaling is used —
   and that component gets special scrutiny).
 
 ### Network Isolation
@@ -142,14 +141,14 @@ services:
 
 ### Write Permissions Matrix
 
-| Agent      | /workspace (main repo) | /workspace/.worktrees/* | /data/db | /data/logs |
-|-----------|----------------------|------------------------|----------|------------|
-| Nelson    | read-only            | read-only              | read-write | write-only |
-| Julius    | read-only            | read-only              | read-only  | write-only |
-| Sherlock  | read-only            | read-only              | read-only  | write-only |
-| Leonard   | read-only            | **own worktree only (RW)** | read-only  | write-only |
-| Katherine | read-only            | read-only              | read-write | write-only |
-| Richelieu | **read-write**       | **read-write**         | read-write | write-only |
+| Agent      | /workspace (main repo) | /workspace/.worktrees/* | /data/logs |
+|-----------|----------------------|------------------------|------------|
+| Nelson    | read-only            | read-only              | write-only |
+| Julius    | read-only            | read-only              | write-only |
+| Sherlock  | read-only            | read-only              | write-only |
+| Leonard   | read-only            | **own worktree only (RW)** | write-only |
+| Katherine | read-only            | read-only              | write-only |
+| Richelieu | **read-write**       | **read-write**         | write-only |
 
 ### Secret Scanning in Generated Code
 
@@ -207,7 +206,7 @@ Every security-relevant event is logged:
 - Budget limit triggers.
 - Failed authentication attempts.
 
-The audit trail is stored in SQLite (not just log files) for queryability:
+The audit trail is stored in PostgreSQL (not just log files) for queryability:
 
 ```sql
 CREATE TABLE audit_log (

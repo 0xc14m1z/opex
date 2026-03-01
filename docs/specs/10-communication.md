@@ -267,7 +267,7 @@ class DeadLetterPayload(BaseModel):
 
 Dead letters are:
 - Visible in the TUI.
-- Manually retriable via TUI or CLI.
+- Manually retriable via TUI, CLI, or Grafana dashboard.
 - Auto-cleaned after 7 days.
 
 ## Message Ordering & Delivery Guarantees

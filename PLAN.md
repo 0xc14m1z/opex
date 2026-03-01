@@ -26,7 +26,7 @@ loop where Claude, GPT, and Gemini cross-review each other until they converge.
      - Round 3: Apply weighted voting (weights learned from historical accuracy).
      - No convergence: Escalate to human with all positions summarized.
 - **Outputs**: Consensus result, confidence score, dissenting opinions, round count.
-- **State tracked**: Per-provider accuracy weights (SQLite), consensus history for auditing.
+- **State tracked**: Per-provider accuracy weights (PostgreSQL), consensus history for auditing.
 
 ### Julius — Task Decomposer
 - **Purpose**: Takes a high-level plan (from humans) and decomposes it into minimal,
@@ -161,7 +161,7 @@ loop where Claude, GPT, and Gemini cross-review each other until they converge.
 - When a human overrides a consensus decision, the providers that agreed with the human
   get a small weight boost; those that disagreed get a small penalty.
 - Weights are normalized so they always sum to 3.0 (for 3 providers).
-- Weights are stored in SQLite and evolve over time.
+- Weights are stored in PostgreSQL and evolve over time.
 - A minimum weight floor (0.5) prevents any provider from being completely silenced.
 
 ---
@@ -174,7 +174,7 @@ loop where Claude, GPT, and Gemini cross-review each other until they converge.
 | Novelty             | Nelson          | New patterns, deps, or architectural changes       |
 | Complexity          | Heuristics      | Files changed, cyclomatic complexity delta          |
 | AI Confidence       | Nelson          | Consensus confidence from the review loop           |
-| Historical Accuracy | SQLite          | How often similar PRs needed human intervention    |
+| Historical Accuracy | PostgreSQL      | How often similar PRs needed human intervention    |
 
 ### Adaptive Threshold
 - Initial threshold is set conservatively (flag most PRs for human review).
@@ -245,17 +245,18 @@ Human creates plan
 | Layer               | Technology                          | Purpose                                |
 |---------------------|-------------------------------------|----------------------------------------|
 | Agent framework     | PydanticAI                          | Typed agents, tool use, structured I/O |
-| LLM routing         | LiteLLM                             | Unified API for Claude/GPT/Gemini      |
+| LLM routing         | LiteLLM + OpenRouter                | Single API key, unified access to all LLM providers |
 | Task queue          | Redis (streams or pub/sub)          | Pipeline communication, task dispatch  |
-| Durable state       | SQLite                              | Confidence scores, weights, history    |
+| Durable state       | PostgreSQL (asyncpg)                | Durable state, concurrent access from all containers |
 | Git operations      | GitPython + subprocess              | Branch/worktree management             |
 | GitHub integration  | PyGithub / `gh` CLI                 | Issue intake, PR creation, comments    |
 | Containerization    | Docker + Docker Compose             | Agent isolation                        |
 | Dev workflow        | Makefile                            | Build, test, run, logs                 |
 | Package management  | uv                                  | Fast dependency management             |
 | Logging             | structlog                           | Structured JSON logging                |
-| Dashboard           | FastAPI + HTMX (or similar)         | Observability web UI                   |
-| Testing             | pytest                              | Agent and integration testing          |
+| Dashboard           | TUI (Textual) + Grafana/Loki        | Real-time TUI + log inspection         |
+| Testing             | pytest + testcontainers + VCR       | Agent and integration testing          |
+| Log aggregation     | Grafana + Loki                      | Structured log querying, dashboards, alerting |
 
 ---
 
@@ -288,7 +289,10 @@ ai-team/
 │           │   └── redis.py        # Redis queue/pub-sub abstraction
 │           ├── state/
 │           │   ├── __init__.py
-│           │   └── store.py        # SQLite state management
+│           │   └── store.py        # PostgreSQL state management
+│           ├── migrations/
+│           │   ├── 001_initial_schema.sql
+│           │   └── migrator.py        # Lightweight migration runner
 │           ├── git/
 │           │   ├── __init__.py
 │           │   └── workspace.py    # Git/worktree operations
@@ -423,6 +427,23 @@ git:
   require_pr: true
   auto_merge: false                   # Even if Katherine approves, don't auto-merge
 
+# Budget limits
+budget:
+  soft_limit: 5.00                    # Warn when pipeline exceeds this ($)
+  hard_limit: 20.00                   # Halt pipeline at this cost ($)
+
+# LLM configuration
+llm:
+  default_model: anthropic/claude-sonnet-4
+  consensus:
+    models:
+      - anthropic/claude-sonnet-4
+      - openai/gpt-4o
+      - google/gemini-2.0-flash
+    max_rounds: 3
+  overrides:                                 # Optional: per-agent model override
+    leonard: anthropic/claude-sonnet-4
+
 # Scoring overrides
 review:
   human_review_threshold: 0.7         # Score above this → human review required
@@ -430,6 +451,32 @@ review:
     - "migrations/"                   # Always flag changes to these paths
     - "infrastructure/"
     - "*.sql"
+```
+
+### Environment Configuration (`.env`)
+
+Secrets and infrastructure config live in `.env` (gitignored), separate from
+project-level config in `.ai-team.yaml`.
+
+```env
+# LLM access (single key via OpenRouter)
+OPENROUTER_API_KEY=sk-or-...
+
+# Infrastructure
+REDIS_URL=redis://redis:6379/0
+DATABASE_URL=postgresql://ai_team:ai_team@postgres:5432/ai_team
+
+# GitHub
+GITHUB_APP_ID=12345
+GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github_app_key.pem
+GITHUB_WEBHOOK_SECRET=whsec_...
+
+# Operational
+LOG_LEVEL=INFO
+MAX_PARALLEL_LEONARDS=3
+DAILY_BUDGET_HARD=50.00
+DEFAULT_BUDGET_LIMIT_SOFT=5.00
+DEFAULT_BUDGET_LIMIT_HARD=20.00
 ```
 
 ---
@@ -442,16 +489,33 @@ review:
 - [ ] Initialize uv workspace with root `pyproject.toml`.
 - [ ] Set up `core/` package structure.
 - [ ] Implement Redis queue abstraction (`core/queue/`).
-- [ ] Implement SQLite state store (`core/state/`).
-- [ ] Implement LiteLLM client wrapper (`core/llm/client.py`).
+- [ ] Implement PostgreSQL state store (asyncpg) with migration runner (`core/state/`, `core/migrations/`).
+- [ ] Implement full LiteLLM + OpenRouter client wrapper (`core/llm/client.py`).
 - [ ] Implement structlog configuration (`core/logging/`).
 - [ ] Define Pydantic models for tasks, reviews, configs (`core/models/`).
 - [ ] Parse `.ai-team.yaml` into typed config.
-- [ ] Set up Docker Compose (Redis, SQLite volume).
+- [ ] Set up Docker Compose (Redis, PostgreSQL, Loki, Grafana).
 - [ ] Set up Makefile (build, test, up, down, logs).
 - [ ] Set up pytest with basic test infrastructure.
 
-### Phase 1 — Nelson: The Consensus Engine (Week 3)
+### Phase 1 — Controller: Pipeline Orchestrator (Week 3)
+> The conductor. No LLM — pure infrastructure that launches and monitors everything.
+
+- [ ] Scaffold `controller/` package (config, state tracker, launcher, watchdog, router).
+- [ ] Implement `ControllerConfig` (Pydantic settings from environment).
+- [ ] Implement `pipelines` and `active_containers` PostgreSQL tables + migrations.
+- [ ] Implement `StateTracker` (pipeline CRUD, container lifecycle, task status).
+- [ ] Implement `Launcher` with Docker SDK (launch, stop, inspect, wait, remove).
+- [ ] Implement `Watchdog` loop (heartbeat monitoring, dead container detection, retry vs. escalate).
+- [ ] Implement `Router` with full event → handler dispatch table.
+- [ ] Implement pipeline lifecycle state machine (created → decomposing → in_progress → completing → completed/failed).
+- [ ] Implement dependency graph dispatch (get_ready_tasks → launch Sherlocks on batch).
+- [ ] Implement failure recovery flows (retry, escalate, pause pipeline).
+- [ ] Add controller to Docker Compose (with Docker socket mount).
+- [ ] Write unit tests for all components (mock Docker SDK, mock Redis).
+- [ ] Write integration tests with Redis + mock containers.
+
+### Phase 2 — Nelson: The Consensus Engine (Week 4)
 > The heart of the system. Everything else depends on this.
 
 - [ ] Implement parallel LLM prompt dispatch (Claude + GPT + Gemini).
@@ -464,7 +528,7 @@ review:
 - [ ] Write integration test with real LLM calls.
 - [ ] Dockerize Nelson.
 
-### Phase 2 — Richelieu: Git Backbone (Week 4)
+### Phase 3 — Richelieu: Git Backbone (Week 5)
 > Without git management, no agent can do real work.
 
 - [ ] Implement feature branch creation.
@@ -477,7 +541,7 @@ review:
 - [ ] Write tests against a test git repo.
 - [ ] Dockerize Richelieu.
 
-### Phase 3 — Julius: Task Decomposition (Week 5-6)
+### Phase 4 — Julius: Task Decomposition (Week 6-7)
 > Turn plans into parallelizable work.
 
 - [ ] Implement plan intake (parse plan from GitHub issue or direct input).
@@ -489,7 +553,7 @@ review:
 - [ ] Write tests with sample plans and expected decompositions.
 - [ ] Dockerize Julius.
 
-### Phase 4 — Sherlock: Task Enrichment (Week 7)
+### Phase 5 — Sherlock: Task Enrichment (Week 8)
 > Deep codebase understanding for each task.
 
 - [ ] Implement targeted codebase reading (files, functions, patterns).
@@ -499,7 +563,7 @@ review:
 - [ ] Write tests with sample tasks and expected execution plans.
 - [ ] Dockerize Sherlock.
 
-### Phase 5 — Leonard: Implementation (Week 8-9)
+### Phase 6 — Leonard: Implementation (Week 9-10)
 > The coding agent. Most complex, most risk.
 
 - [ ] Implement code generation from mini execution plan.
@@ -513,7 +577,7 @@ review:
 - [ ] Write tests with controlled codebases and expected outputs.
 - [ ] Dockerize Leonard (needs code execution capabilities).
 
-### Phase 6 — Katherine: Code Review (Week 10)
+### Phase 7 — Katherine: Code Review (Week 11)
 > Quality gate with adaptive human escalation.
 
 - [ ] Implement diff analysis.
@@ -526,17 +590,15 @@ review:
 - [ ] Write tests for scoring edge cases.
 - [ ] Dockerize Katherine.
 
-### Phase 7 — Pipeline Integration (Week 11-12)
-> Wire everything together end-to-end.
+### Phase 8 — End-to-End Integration (Week 12-13)
+> Wire everything together and prove it works.
 
-- [ ] Implement full pipeline orchestration (Julius → Sherlock → Leonard → Katherine).
-- [ ] Implement parallel Leonard dispatch based on dependency graph.
-- [ ] Implement Richelieu integration at every stage.
 - [ ] End-to-end integration test with a real repo and real LLM calls.
+- [ ] Verify controller drives full pipeline (plan → PR) with all agents.
 - [ ] Error handling and graceful degradation across the pipeline.
 - [ ] GitHub webhook integration for issue intake.
 
-### Phase 8 — Dashboard & Observability (Week 13)
+### Phase 9 — Dashboard & Observability (Week 14)
 > See what the agents are doing.
 
 - [ ] FastAPI app with basic routes.
@@ -547,7 +609,7 @@ review:
 - [ ] Log viewer with filtering.
 - [ ] Dockerize dashboard.
 
-### Phase 9 — Hardening & Polish (Week 14+)
+### Phase 10 — Hardening & Polish (Week 15+)
 > Production-readiness.
 
 - [ ] Rate limiting for LLM API calls.
@@ -567,9 +629,9 @@ review:
 | Agent isolation | Docker containers (each agent) | Safety — Leonard runs arbitrary code. Blast radius control. |
 | Communication | Redis Streams + dead letter queue | Durable, replayable, supports consumer groups for parallel Leonards. |
 | Nelson integration | Also via Redis (everything through Redis) | Single communication backbone. No direct container-to-container calls. |
-| State storage | Redis + SQLite | Redis for ephemeral/real-time, SQLite for durable data. No infra overhead. |
-| LLM routing | LiteLLM | Single API for 3+ providers. Fallback, retries, streaming built-in. |
-| LLM providers | Claude + GPT-4o + Gemini | Three providers for robust consensus. |
+| State storage | Redis + PostgreSQL (asyncpg) | Redis for ephemeral/real-time, PostgreSQL for durable data. Proper concurrent access from all containers. |
+| LLM routing | LiteLLM + OpenRouter | Single API key, single billing source. Adding models is a config change. |
+| LLM providers | Claude + GPT-4o + Gemini (via OpenRouter) | Three providers for robust consensus. Single API key via OpenRouter. |
 | Agent framework | PydanticAI | Typed tool use, structured outputs, minimal magic. Maximum control. |
 | Consensus termination | Hybrid (majority → weighted → human) | Balances speed (quick consensus) with accuracy (weighted tiebreak) and safety (human escalation). |
 | Consensus output | Structured decision + free reasoning | JSON envelope for programmatic comparison + freeform reasoning for nuance. |
@@ -582,15 +644,19 @@ review:
 | Project config | `.ai-team.yaml` per repo | Clean interface between the agent system and any target codebase. |
 | Package management | uv workspaces | Fast, modern Python tooling. Workspace support for monorepo. |
 | Filesystem access | All agents read repo, only Leonard + Richelieu write | Everyone can analyze the codebase. Write permissions are restricted. |
-| Observability UI | TUI (Textual) | Lightweight, no browser, fits dev workflow. |
+| Observability UI | TUI (Textual) + Grafana/Loki | TUI for real-time, Grafana for historical log querying and dashboards. |
 | Logging | Everything, always (structlog + JSON) | Full replay capability. Correlation IDs trace across agents. |
 | Cost tracking | Per LLM call, configurable budget limits | Soft limits warn, hard limits halt. Daily hard ceiling as safety net. |
 | Error recovery | Checkpoint + 3 retries + escalate | Resume from last checkpoint, alert human, max 3 retries. |
-| Testing | Record/replay (VCR) + snapshot updates | Deterministic tests without real API calls. Update like snapshot tests. |
+| Testing | testcontainers + VCR cassettes | Real Redis and PostgreSQL via testcontainers. VCR for LLM recordings. No mocks. |
 | Dev standards | Strict (ruff + mypy strict + 90%+ coverage) | High quality bar for the system that writes code for others. |
-| Secrets | .env files (gitignored) | Simple, no infrastructure overhead. Per-agent secret scoping. |
+| Secrets | .env files (gitignored) | Simple, no infrastructure overhead. Single OPENROUTER_API_KEY instead of multiple provider keys. Per-agent secret scoping. |
 | Deployment | Docker Compose + Makefile | Makefile for dev workflow, Compose for service orchestration. |
-| Dog-fooding | From Phase 7 onward | Use ai-team on itself once pipeline is proven stable. |
+| Log aggregation | Grafana + Loki | Docker logging driver ships all logs to Loki. Zero-config per agent. |
+| LLM config | .ai-team.yaml (not env vars) | Target repo owner decides model preferences. Secrets (.env) separate from config. |
+| Health checks | Redis heartbeats | No HTTP servers in agents. Controller watchdog monitors heartbeats. |
+| DB migrations | Numbered SQL files + runner | Simple, no heavy deps (no Alembic). Works with asyncpg. |
+| Dog-fooding | From Phase 8 onward | Use ai-team on itself once pipeline is proven stable. |
 
 ---
 
@@ -611,7 +677,8 @@ Each area has its own deep-dive spec document:
 | Security | [09-security.md](docs/specs/09-security.md) | Secrets, container hardening, filesystem permissions, prompt injection defense |
 | Communication | [10-communication.md](docs/specs/10-communication.md) | Redis Streams, consumer groups, message envelopes, dead letter queue |
 | Testing | [11-testing.md](docs/specs/11-testing.md) | Record/replay (VCR), unit/integration/E2E pyramid, CI stages |
-| Data Models | [12-data-models.md](docs/specs/12-data-models.md) | All Pydantic models, SQLite schema, complete type catalog |
+| Data Models | [12-data-models.md](docs/specs/12-data-models.md) | All Pydantic models, PostgreSQL schema, complete type catalog |
+| Orchestrator | [13-orchestrator.md](docs/specs/13-orchestrator.md) | Pipeline controller: event router, container launcher, watchdog, dependency dispatch |
 
 ---
 
@@ -619,11 +686,16 @@ Each area has its own deep-dive spec document:
 
 - **Long-term memory**: Should agents build persistent knowledge about a codebase across
   runs? (e.g., "last time we changed this module, tests in X broke")
-- **Cost optimization**: Nelson's consensus loop is 3x the LLM cost. When is it worth
-  skipping consensus for low-stakes decisions?
+- **Cost optimization** *(partially resolved)*: Nelson's consensus loop is 3x the LLM cost.
+  Model selection is now configurable via `.ai-team.yaml`, so repo owners can choose
+  cheaper models for consensus. Remaining question: when to skip consensus entirely for
+  low-stakes decisions?
+- **OpenRouter rate limits**: How do OpenRouter's rate limits interact with parallel
+  Nelson calls? May need request queuing or per-pipeline concurrency caps.
 - **Streaming**: Should agents stream their progress to the dashboard in real-time?
 - **Multi-repo**: Can the system work across multiple repos in a single feature?
-- **Kubernetes migration**: Docker Compose → k8s when scaling is needed.
+- **Multi-machine scaling**: The Launcher abstraction (spec 01) supports Docker SDK,
+  Kubernetes Jobs, and ECS Tasks backends. When to migrate from single machine?
 - **Plugin system**: Allow custom agents to be added by users.
 - **Notification channels**: Slack/Discord integration for human escalation.
 - **Caching**: Cache LLM responses for identical prompts across consensus rounds?

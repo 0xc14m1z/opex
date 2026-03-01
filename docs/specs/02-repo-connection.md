@@ -45,7 +45,7 @@ User runs: make connect REPO=https://github.com/org/my-app
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│ 5. Store connection in SQLite           │
+│ 5. Store connection in PostgreSQL        │
 │    - Repo URL, auth method, branch,     │
 │      config hash, connection timestamp  │
 └────────────────┬────────────────────────┘
@@ -188,6 +188,19 @@ intake:
 budget:
   soft_limit_per_task: 5.00               # USD
   hard_limit_per_task: 20.00              # USD
+
+# LLM configuration
+llm:
+  default_model: anthropic/claude-sonnet-4       # Model for direct agent calls
+  consensus:
+    models:                                       # Models used by Nelson
+      - anthropic/claude-sonnet-4
+      - openai/gpt-4o
+      - google/gemini-2.0-flash
+    max_rounds: 3                                 # Max cross-review iterations
+  overrides:                                      # Optional: per-agent model override
+    leonard: anthropic/claude-sonnet-4
+    sherlock: google/gemini-2.0-flash
 ```
 
 ## Repo Sync
@@ -217,5 +230,5 @@ make disconnect REPO=https://github.com/org/my-app
 
 - Removes the workspace volume.
 - Deregisters webhooks.
-- Cleans up SQLite connection records.
+- Cleans up PostgreSQL connection records.
 - Stops any in-progress work on that repo (with confirmation).

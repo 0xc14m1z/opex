@@ -46,8 +46,9 @@ class ConsensusRequest(BaseModel):
     # Consensus settings (overridable per request)
     max_rounds: int = 3                      # Max cross-review iterations
     required_agreement: float = 0.67         # Fraction needed (0.67 = 2/3)
-    providers: list[str] | None              # Override default providers
-                                             # e.g., ["claude", "gpt4o"]
+    providers: list[str] | None              # Override models from .ai-team.yaml
+                                             # e.g., ["anthropic/claude-sonnet-4",
+                                             #        "openai/gpt-4o"]
     priority: Literal["low", "normal", "high"] = "normal"
 ```
 
@@ -174,10 +175,13 @@ def calculate_confidence(
 
 ### Initial Weights
 
-All providers start with equal weight:
-- Claude: 1.0
-- GPT-4o: 1.0
-- Gemini: 1.0
+All providers start with equal weight. The providers used for consensus are
+configured in `.ai-team.yaml` under `llm.consensus.models`. For example, with
+three providers (`anthropic/claude-sonnet-4`, `openai/gpt-4o`,
+`google/gemini-2.0-flash`):
+- anthropic/claude-sonnet-4: 1.0
+- openai/gpt-4o: 1.0
+- google/gemini-2.0-flash: 1.0
 
 Weights always normalize to sum = N (number of providers).
 
@@ -212,7 +216,7 @@ def update_weights(
 
 ### Weight Persistence
 
-Weights are stored in SQLite per scope:
+Weights are stored in PostgreSQL per scope:
 
 | Scope          | Example                       | Purpose                         |
 |---------------|-------------------------------|---------------------------------|
@@ -295,8 +299,12 @@ Optimization strategies:
 1. **Skip consensus for low-stakes decisions**: If a single LLM can handle it
    (e.g., formatting, simple code generation), don't involve Nelson.
 2. **Use cheaper models for cross-review**: Initial response from top-tier models,
-   cross-review from cheaper tiers (configurable).
+   cross-review from cheaper tiers. Configure via `llm.consensus.models` in
+   `.ai-team.yaml` — use cheaper models in the list to reduce cost.
 3. **Cache identical prompts**: If the same exact prompt was recently evaluated,
    return the cached result.
 4. **Early termination**: If all providers agree in round 1, skip remaining rounds.
-5. **2-provider mode**: For medium-stakes, use only 2 providers instead of 3.
+5. **2-provider mode**: For medium-stakes, configure only 2 models in
+   `llm.consensus.models` instead of 3.
+6. **OpenRouter consolidation**: All calls go through OpenRouter, which handles
+   billing consolidation. Monitor costs via the Grafana dashboard.

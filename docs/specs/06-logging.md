@@ -164,13 +164,38 @@ def configure_logging(agent_name: str, log_level: str = "DEBUG") -> None:
 
 ## Log Output Destinations
 
-Each agent writes logs to two places simultaneously:
+Each agent writes logs to three destinations, each serving a different purpose:
 
 1. **Stdout** (captured by Docker): For `docker compose logs` and standard container
-   log management.
+   log management. Automatically forwarded to Loki via the Docker logging driver.
 2. **Redis Stream** (`logs:{agent_name}`): For real-time TUI consumption.
+3. **Loki** (via Docker logging driver): For historical querying, dashboards, and
+   alerting through Grafana. This requires no agent code changes — Docker forwards
+   stdout to Loki automatically.
 
 The TUI subscribes to all `logs:*` streams and merges them into a unified view.
+
+## Loki + Grafana
+
+Loki is the primary log aggregation and querying backend. It ingests logs
+automatically via Docker's Loki logging driver — no Promtail or sidecar needed.
+Each container's stdout is forwarded directly to Loki by the Docker daemon.
+
+**Grafana** sits on top of Loki and provides:
+
+- **LogQL querying**: Filter and search logs by any structured field (agent, task,
+  pipeline, correlation_id, event type, level, etc.).
+- **Dashboards**: Pre-built views for pipeline health, LLM cost tracking, error
+  rates, and agent activity.
+- **Alerting**: Rules that fire on error spikes, budget warnings, or agent crashes.
+
+The three log destinations serve complementary purposes:
+
+| Destination     | Purpose                                      |
+|-----------------|----------------------------------------------|
+| Loki / Grafana  | Historical querying, dashboards, alerting    |
+| Redis Streams   | Real-time TUI consumption                    |
+| Stdout          | Docker native logs (`docker compose logs`)   |
 
 ## Log Levels in Practice
 
@@ -185,17 +210,21 @@ The TUI subscribes to all `logs:*` streams and merges them into a unified view.
 ## Querying Logs
 
 Logs can be queried through:
-- **TUI**: Filter by agent, level, task, and time range.
+- **Grafana**: LogQL queries against Loki — the primary tool for log exploration,
+  dashboards, and alerting.
+- **TUI**: Filter by agent, level, task, and time range (real-time via Redis Streams).
 - **CLI**: `make logs AGENT=leonard-1 LEVEL=error TASK=42`
 - **Direct file access**: JSON files in `/data/logs/`, parseable with `jq`.
 
-```bash
+### LogQL Examples (Grafana)
+
+```logql
 # All errors from leonard in the last hour
-cat /data/logs/leonard-1.jsonl | jq 'select(.level == "error")'
+{service="leonard-1"} |= "error"
 
-# All LLM calls for task 42, sorted by cost
-cat /data/logs/*.jsonl | jq 'select(.task_id == "task-42" and .event == "llm_call_completed")' | jq -s 'sort_by(.data.cost_usd) | reverse'
+# All LLM calls for task 42
+{service=~".*"} | json | task_id="task-42" and event="llm_call_completed"
 
-# Total tokens by provider today
-cat /data/logs/*.jsonl | jq 'select(.event == "llm_call_completed") | .data | {provider, tokens: (.prompt_tokens + .completion_tokens)}'
+# Total tokens by provider
+{service=~".*"} | json | event="llm_call_completed" | line_format "{{.provider}} {{.data_prompt_tokens}}"
 ```

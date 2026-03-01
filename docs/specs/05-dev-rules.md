@@ -74,6 +74,15 @@ testpaths = ["tests"]
 addopts = "--cov=core --cov=agents --cov-report=term-missing --cov-fail-under=90"
 ```
 
+### Test Infrastructure
+
+- **No mocks**: Tests use real services, never fakes or mocks.
+- **testcontainers**: Real Redis (`testcontainers-redis`) and real PostgreSQL
+  (`testcontainers-postgres`) instances per test session.
+- **VCR cassettes**: LLM API calls are recorded on first run and replayed
+  deterministically on subsequent runs via `vcrpy` / `pytest-recording`.
+- **CI**: Runs with `--vcr-record=none` (replay only, no real API calls).
+
 ## Coding Conventions
 
 ### Project-Wide
@@ -155,12 +164,13 @@ jobs:
     - mypy .
 
   test-unit:
-    - pytest tests/unit/ --cov --cov-fail-under=90
+    # testcontainers auto-starts Redis + PostgreSQL
+    - pytest tests/unit/ --cov --cov-fail-under=90 --vcr-record=none
 
   test-integration:
     # Only on main or when manually triggered
-    - docker compose up -d redis
-    - pytest tests/integration/
+    - docker compose up -d redis postgres
+    - pytest tests/integration/ --vcr-record=none
     - docker compose down
 
   build:
@@ -190,5 +200,5 @@ jobs:
 
 - All PRs require at least one review.
 - CI must pass before merge.
-- Dog-fooding (Phase 7+): ai-team reviews its own PRs through the standard
+- Dog-fooding (Phase 8+): ai-team reviews its own PRs through the standard
   agent pipeline. Human still has final say.

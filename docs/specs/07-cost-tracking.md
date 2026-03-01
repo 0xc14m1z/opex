@@ -15,22 +15,22 @@ Daily Budget ($100)
   └── Pipeline Run (feature/add-user-auth)
        └── Task #2 (Create auth endpoints)
             ├── Sherlock: enrichment calls
-            │    ├── LLM call: claude-sonnet  $0.12
-            │    └── LLM call: gpt-4o         $0.08
+            │    ├── LLM call: anthropic/claude-sonnet-4  $0.12
+            │    └── LLM call: openai/gpt-4o             $0.08
             ├── Nelson: consensus for approach
-            │    ├── Round 1: claude $0.15 + gpt4o $0.12 + gemini $0.09
-            │    └── Round 2: claude $0.18 + gpt4o $0.14 + gemini $0.11
+            │    ├── Round 1: anthropic/claude-sonnet-4 $0.15 + openai/gpt-4o $0.12 + google/gemini-pro-1.5 $0.09
+            │    └── Round 2: anthropic/claude-sonnet-4 $0.18 + openai/gpt-4o $0.14 + google/gemini-pro-1.5 $0.11
             ├── Leonard: implementation
-            │    ├── LLM call: claude-sonnet  $0.45
-            │    └── LLM call: claude-sonnet  $0.22
+            │    ├── LLM call: anthropic/claude-sonnet-4  $0.45
+            │    └── LLM call: anthropic/claude-sonnet-4  $0.22
             └── Katherine: review
                  └── Nelson: consensus for review
-                      └── Round 1: claude $0.15 + gpt4o $0.12 + gemini $0.09
+                      └── Round 1: anthropic/claude-sonnet-4 $0.15 + openai/gpt-4o $0.12 + google/gemini-pro-1.5 $0.09
 ```
 
 ## Cost Record Schema
 
-Every LLM call generates a cost record stored in SQLite:
+Every LLM call generates a cost record stored in PostgreSQL:
 
 ```python
 class CostRecord(BaseModel):
@@ -43,53 +43,63 @@ class CostRecord(BaseModel):
     consensus_request_id: str | None         # If part of a Nelson consensus
     consensus_round: int | None              # Which round in the consensus
 
-    # LLM details
-    provider: str                            # "claude", "gpt4o", "gemini"
-    model: str                               # "claude-3-5-sonnet-20241022"
+    # LLM details — provider is the OpenRouter model ID
+    provider: str                            # "anthropic/claude-sonnet-4", "openai/gpt-4o"
+    model: str                               # Full model identifier from OpenRouter
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
 
-    # Cost
-    cost_usd: float                          # Calculated from token counts + pricing
-    pricing_snapshot: dict                   # The per-token prices used for calculation
+    # Cost — sourced from OpenRouter response metadata via LiteLLM
+    cost_usd: float                          # From OpenRouter's response_cost
 
     # Context
     purpose: str                             # "enrichment", "implementation",
                                              # "review", "consensus", "scoring"
 ```
 
-## Pricing Configuration
+## Pricing: OpenRouter Cost Extraction
 
-Provider pricing is configured centrally and updated when prices change:
+All LLM calls are routed through OpenRouter, which provides per-call cost data
+in API responses. LiteLLM extracts this into a `response_cost` field, so there
+is no need to maintain a local pricing table for every model.
+
+Cost is extracted immediately after each LLM call:
 
 ```python
 # core/cost/pricing.py
-PRICING: dict[str, ModelPricing] = {
-    "claude-3-5-sonnet-20241022": ModelPricing(
-        input_per_1k=0.003,
-        output_per_1k=0.015,
-    ),
-    "claude-3-opus-20240229": ModelPricing(
-        input_per_1k=0.015,
-        output_per_1k=0.075,
-    ),
-    "gpt-4o": ModelPricing(
-        input_per_1k=0.005,
-        output_per_1k=0.015,
-    ),
-    "gemini-1.5-pro": ModelPricing(
-        input_per_1k=0.00125,
-        output_per_1k=0.005,
-    ),
-}
+
+def extract_cost(litellm_response) -> float:
+    """Extract cost from LiteLLM response (sourced from OpenRouter)."""
+    if hasattr(litellm_response, "_hidden_params"):
+        cost = litellm_response._hidden_params.get("response_cost")
+        if cost is not None:
+            return cost
+    # Fallback: estimate from token counts
+    return estimate_cost_from_tokens(
+        model=litellm_response.model,
+        prompt_tokens=litellm_response.usage.prompt_tokens,
+        completion_tokens=litellm_response.usage.completion_tokens,
+    )
 ```
 
-Cost is calculated immediately after each LLM call:
+A fallback pricing table is kept for the rare case where OpenRouter does not
+return cost data (e.g., network errors, unsupported models). This table only
+needs approximate values since it is a safety net, not the primary source:
 
 ```python
-def calculate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    pricing = PRICING[model]
+# Fallback only — OpenRouter is the source of truth
+FALLBACK_PRICING: dict[str, ModelPricing] = {
+    "anthropic/claude-sonnet-4": ModelPricing(input_per_1k=0.003, output_per_1k=0.015),
+    "openai/gpt-4o": ModelPricing(input_per_1k=0.005, output_per_1k=0.015),
+    "google/gemini-pro-1.5": ModelPricing(input_per_1k=0.00125, output_per_1k=0.005),
+}
+
+def estimate_cost_from_tokens(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    pricing = FALLBACK_PRICING.get(model)
+    if pricing is None:
+        log.warning("no_fallback_pricing", model=model)
+        return 0.0
     return (
         (prompt_tokens / 1000) * pricing.input_per_1k
         + (completion_tokens / 1000) * pricing.output_per_1k
@@ -111,7 +121,9 @@ Daily Hard Limit ($100/day) — ALWAYS enforced, cannot be overridden
 
 1. **Per-task override** (set by Julius when creating tasks, or by human).
 2. **`.ai-team.yaml`** project config (`budget.soft_limit_per_task`, `budget.hard_limit_per_task`).
-3. **System defaults** from `.env` (`DEFAULT_BUDGET_LIMIT_SOFT`, `DEFAULT_BUDGET_LIMIT_HARD`).
+   This is the primary place to configure soft/hard limits per project.
+3. **`.env`** — only `DAILY_BUDGET_HARD` as a system-level safety net.
+   Per-task defaults come from `.ai-team.yaml`, not `.env`.
 
 ### Enforcement Logic
 
@@ -147,13 +159,13 @@ async def check_budget(task_id: str, new_cost: float) -> BudgetAction:
 
 ## Aggregation Queries
 
-SQLite makes it easy to query costs at any granularity:
+PostgreSQL makes it easy to query costs at any granularity:
 
 ```sql
 -- Total cost by agent today
 SELECT agent, SUM(cost_usd) as total
 FROM cost_records
-WHERE DATE(timestamp) = DATE('now')
+WHERE timestamp::date = CURRENT_DATE
 GROUP BY agent;
 
 -- Total cost by provider this week
@@ -161,7 +173,7 @@ SELECT provider, SUM(cost_usd) as total,
        SUM(prompt_tokens) as input_tokens,
        SUM(completion_tokens) as output_tokens
 FROM cost_records
-WHERE timestamp > DATE('now', '-7 days')
+WHERE timestamp > CURRENT_DATE - INTERVAL '7 days'
 GROUP BY provider;
 
 -- Most expensive tasks
