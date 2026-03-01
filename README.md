@@ -39,33 +39,55 @@ Every failure escalates to a human with full context — the system never silent
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Docker Compose Network                                 │
-│                                                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────┐  ┌───────────┐   │
-│  │  Redis    │  │ Postgres │  │ Loki │  │  Grafana   │   │
-│  │ (streams) │  │ (state)  │  │(logs)│  │ (:3000)    │   │
-│  └────┬─────┘  └────┬─────┘  └──┬───┘  └───────────┘   │
-│       │              │           │                       │
-│  ┌────┴──────────────┴───────────┴────┐                 │
-│  │         Orchestrator               │                 │
-│  │   (event router + launcher)        │                 │
-│  └────────────┬───────────────────────┘                 │
-│               │ spawns ephemeral containers             │
-│  ┌────────────┼────────────────────────────┐            │
-│  │  Nelson  Julius  Sherlock  Leonard  ... │            │
-│  └─────────────────────────────────────────┘            │
-│                                                         │
-│  ┌──────────────┐                                       │
-│  │  API Server   │ ◄── REST + SSE (:8080)               │
-│  └──────────────┘                                       │
-└─────────────────────────────────────────────────────────┘
-        ▲
-        │
-   ┌────┴─────┐
-   │   TUI    │  (pip-installable Textual client)
-   └──────────┘
+```mermaid
+C4Container
+    title Opex — Container Diagram
+
+    Person(user, "Developer", "Writes feature plans, reviews PRs")
+
+    Container_Boundary(host, "Host Machine") {
+        Container(tui, "TUI", "Textual", "Real-time dashboard and diagnostic chat")
+    }
+
+    Container_Boundary(docker, "Docker Compose Network") {
+
+        Container(api, "API Server", "FastAPI", "REST + SSE interface, sole external endpoint (:8080)")
+        Container(orchestrator, "Orchestrator", "Python", "Deterministic event router, spawns and monitors all agents")
+
+        Container_Boundary(infra, "Infrastructure") {
+            ContainerDb(redis, "Redis", "Redis Streams", "Inter-agent communication and task dispatch")
+            ContainerDb(postgres, "PostgreSQL", "asyncpg", "Durable pipeline and task state")
+            ContainerDb(loki, "Loki", "Grafana Loki", "Structured log aggregation")
+            Container(grafana, "Grafana", "Grafana", "Log inspection dashboard (:3000)")
+        }
+
+        Container_Boundary(agents, "Ephemeral Agents (spawned on demand)") {
+            Container(nelson, "Nelson", "PydanticAI", "Multi-LLM consensus loops")
+            Container(julius, "Julius", "PydanticAI", "Task decomposition and dependency graphs")
+            Container(sherlock, "Sherlock", "PydanticAI", "Codebase inspection and execution planning")
+            Container(leonard, "Leonard", "PydanticAI", "Code implementation, testing, validation")
+            Container(katherine, "Katherine", "PydanticAI", "Consensus-driven code review")
+            Container(richelieu, "Richelieu", "Python", "Git operations, branching, PR creation")
+        }
+    }
+
+    Rel(user, tui, "Operates")
+    Rel(tui, api, "REST + SSE")
+    Rel(api, redis, "Reads state")
+    Rel(api, postgres, "Reads state")
+    Rel(orchestrator, redis, "Listens and publishes events")
+    Rel(orchestrator, postgres, "Reads and writes state")
+    Rel(orchestrator, agents, "Spawns containers")
+    Rel(nelson, redis, "Publishes consensus results")
+    Rel(julius, redis, "Publishes task graphs")
+    Rel(sherlock, redis, "Publishes execution plans")
+    Rel(leonard, redis, "Publishes implementations")
+    Rel(katherine, redis, "Publishes review decisions")
+    Rel(richelieu, redis, "Publishes git events")
+    Rel(grafana, loki, "Queries logs")
+
+    UpdateRelStyle(user, tui, $offsetY="-10")
+    UpdateRelStyle(tui, api, $offsetX="-30")
 ```
 
 - **Redis Streams** for all inter-agent communication (durable, replayable)
