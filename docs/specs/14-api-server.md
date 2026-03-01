@@ -15,9 +15,11 @@ and writes from outside the Docker Compose network go through this service.
 
 ## Architecture
 
-```
-TUI Client  ──REST + SSE──→  API Server (:8080)  ──→  Redis (internal)
-(standalone)                  (in Docker Compose)  ──→  PostgreSQL (internal)
+```mermaid
+flowchart LR
+    TUI["TUI Client\n(standalone)"] -->|"REST + SSE"| API["API Server (:8080)\n(in Docker Compose)"]
+    API --> Redis["Redis\n(internal)"]
+    API --> PG["PostgreSQL\n(internal)"]
 ```
 
 The API server is an always-running service defined in the Docker Compose file

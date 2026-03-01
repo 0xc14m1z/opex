@@ -34,10 +34,11 @@ It connects to one or more AI team deployments via their API servers.
 
 ### Connection model
 
-```
-TUI Client  ──REST + SSE──→  API Server (:8080)  ──→  Redis (internal)
-(standalone,                  (in Docker Compose)  ──→  PostgreSQL (internal)
- runs on host)
+```mermaid
+flowchart LR
+    TUI["TUI Client\n(standalone, runs on host)"] -->|"REST + SSE"| API["API Server (:8080)\n(in Docker Compose)"]
+    API --> Redis["Redis\n(internal)"]
+    API --> PG["PostgreSQL\n(internal)"]
 ```
 
 The TUI uses the connection string format defined in spec 14:
@@ -393,10 +394,15 @@ side-by-side or unified diff format, color-coded additions/deletions.
 
 The TUI receives real-time updates via the API server's SSE endpoints:
 
-```
-Agent → (structured log) → Redis Stream → API Server SSE → TUI renders
-Agent → (status update) → Redis Stream → API Server SSE → TUI renders
-Agent → (cost event) → Redis Stream → API Server SSE → TUI renders
+```mermaid
+flowchart LR
+    Agent --> |structured log| RS1[Redis Stream]
+    Agent --> |status update| RS2[Redis Stream]
+    Agent --> |cost event| RS3[Redis Stream]
+    RS1 --> |SSE| API[API Server]
+    RS2 --> |SSE| API
+    RS3 --> |SSE| API
+    API --> TUI[TUI renders]
 ```
 
 The TUI is read-only for most operations — it observes pipeline progress via SSE.

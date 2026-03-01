@@ -51,49 +51,22 @@ ALTER TABLE pipelines ADD COLUMN learning_disabled_at_task TEXT;
 When learning mode is active, each task follows an **Extract → Replay → Verify**
 loop:
 
-```
-1. Leonard implements task → PR opened on GitHub
-2. Katherine reviews → posts comments on PR
-3. Human reviews → posts additional comments on PR
-4. System detects human feedback:
-   │
-   ▼
-5. Nelson analyzes all human comments on the PR
-   │  Extracts candidate principles:
-   │    - What was the issue?
-   │    - Why didn't the system catch it?
-   │    - What principle would prevent this in the future?
-   │
-   ▼
-6. Principles saved to .ai-team/principles/ (in the target repo)
-   │  Human gets notification: "New principles extracted"
-   │  Human can review/edit principles asynchronously (NOT blocking)
-   │
-   ▼
-7. Task branch deleted, worktree cleaned, old PR closed
-   │
-   ▼
-8. Sherlock re-enriches the task with new principles in context
-   │
-   ▼
-9. Leonard re-implements from scratch (NOT amending — full replay)
-   │  New principles are part of Leonard's system prompt
-   │
-   ▼
-10. New PR opened (labeled learning: replay-2, replay-3, etc.)
-    │
-    ▼
-11. Katherine re-reviews with new review principles
-    │
-    ▼
-12. Human reviews again
-    │
-    ├── New feedback → loop to step 5
-    │
-    └── No new feedback → PR approved and merged
-        │
-        ▼
-13. Next task starts with ALL accumulated principles
+```mermaid
+flowchart TD
+    A["1. Leonard implements task\nPR opened on GitHub"] --> B["2. Katherine reviews\nPosts comments on PR"]
+    B --> C["3. Human reviews\nPosts additional comments on PR"]
+    C --> D["4. System detects human feedback"]
+    D --> E["5. Nelson analyzes all human comments\nExtracts candidate principles:\n- What was the issue?\n- Why didn't the system catch it?\n- What principle would prevent this?"]
+    E --> F["6. Principles saved to .ai-team/principles/\nHuman notified (async, NOT blocking)"]
+    F --> G["7. Task branch deleted, worktree cleaned,\nold PR closed"]
+    G --> H["8. Sherlock re-enriches task\nwith new principles in context"]
+    H --> I["9. Leonard re-implements from scratch\n(full replay, new principles in system prompt)"]
+    I --> J["10. New PR opened\n(labeled learning: replay-N)"]
+    J --> K["11. Katherine re-reviews\nwith new review principles"]
+    K --> L["12. Human reviews again"]
+    L -->|New feedback| E
+    L -->|No new feedback| M["PR approved and merged"]
+    M --> N["13. Next task starts with\nALL accumulated principles"]
 ```
 
 ### Cross-task and cross-feature accumulation

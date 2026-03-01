@@ -16,49 +16,33 @@ of this infrastructure. The API server (spec 14) is the sole external interface.
 
 ## Container Architecture
 
-```
-┌───────────────────────────────────────────────────────────────────────────┐
-│                          Docker Compose Network                           │
-│                            (ai-team-net)                                  │
-│                                                                           │
-│  ┌─ Always-running (docker-compose.yml) ───────────────────────────────┐ │
-│  │                                                                       │ │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    │ │
-│  │  │  Redis    │  │PostgreSQL│  │Orchestrator │  │   API Server     │    │ │
-│  │  │ (internal)│  │(internal)│  │(orchestr.)│  │   :8080 (ext)    │    │ │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘    │ │
-│  │                                                                       │ │
-│  │  ┌──────────┐  ┌──────────┐  ┌─────────────────┐                    │ │
-│  │  │   Loki   │  │ Grafana  │  │ Docker Socket    │                    │ │
-│  │  │(internal)│  │  :3000   │  │ Proxy (internal) │                    │ │
-│  │  └──────────┘  └──────────┘  └─────────────────┘                    │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                                                           │
-│  ┌─ Ephemeral (spawned by Orchestrator on demand) ────────────────────────┐│
-│  │                                                                       ││
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    ││
-│  │  │  Nelson   │  │  Julius  │  │ Sherlock │  │  Leonard (x N)    │    ││
-│  │  │  (x N)   │  │          │  │  (x N)   │  │                   │    ││
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘    ││
-│  │                                                                       ││
-│  │  ┌──────────┐  ┌──────────┐                                          ││
-│  │  │Katherine │  │Richelieu │                                          ││
-│  │  │  (x N)   │  │  (x N)   │                                          ││
-│  │  └──────────┘  └──────────┘                                          ││
-│  └───────────────────────────────────────────────────────────────────────┘│
-│                                                                           │
-│  ┌────────────────────────────────────────────────────────────────────┐   │
-│  │                      Target Repo Volume                            │   │
-│  │                      (shared, mostly RO)                           │   │
-│  └────────────────────────────────────────────────────────────────────┘   │
-└───────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph DockerNet["Docker Compose Network (ai-team-net)"]
+        subgraph AlwaysRunning["Always-running (docker-compose.yml)"]
+            Redis["Redis\n(internal)"]
+            PG["PostgreSQL\n(internal)"]
+            Orch["Orchestrator"]
+            API["API Server\n:8080 (ext)"]
+            Loki["Loki\n(internal)"]
+            Grafana["Grafana\n:3000"]
+            Proxy["Docker Socket\nProxy (internal)"]
+        end
+        subgraph Ephemeral["Ephemeral (spawned by Orchestrator on demand)"]
+            Nelson["Nelson (x N)"]
+            Julius["Julius"]
+            Sherlock["Sherlock (x N)"]
+            Leonard["Leonard (x N)"]
+            Katherine["Katherine (x N)"]
+            Richelieu["Richelieu (x N)"]
+        end
+        RepoVol[("Target Repo Volume\n(shared, mostly RO)")]
+    end
 
-External clients (TUI):
-  ┌──────────────────┐
-  │  TUI Client       │─── REST + SSE ──→ API Server :8080
-  │  (standalone,     │    (single connection string,
-  │   runs on host)   │     Tailscale-friendly)
-  └──────────────────┘
+    TUI["TUI Client\n(standalone, runs on host)"] -->|REST + SSE| API
+
+    Orch -->|spawns| Ephemeral
+    Orch -->|TCP:2375| Proxy
 ```
 
 ---
@@ -409,17 +393,15 @@ mounting the raw Docker socket (which grants full host-level Docker access), a
 
 ### Architecture
 
-```
-Orchestrator  ──TCP:2375──→  Docker Socket Proxy  ──unix──→  /var/run/docker.sock
-                           (tecnativa/docker-socket-proxy)
-                           Only allows:
-                           - Container create/start/stop/inspect/wait/remove
-                           Blocks:
-                           - Image build/push/pull
-                           - Network create/delete
-                           - Volume create/delete
-                           - Swarm operations
-                           - Exec into containers
+```mermaid
+flowchart LR
+    Orch[Orchestrator] -->|TCP:2375| Proxy["Docker Socket Proxy\n(tecnativa/docker-socket-proxy)"]
+    Proxy -->|unix socket| Sock["/var/run/docker.sock"]
+
+    Proxy -. "Allows:\n- Container create/start/stop/inspect/wait/remove" .-> Sock
+    Proxy -. "Blocks:\n- Image build/push/pull\n- Network create/delete\n- Volume create/delete\n- Swarm operations\n- Exec into containers" .-x Blocked[ ]
+
+    style Blocked fill:none,stroke:none
 ```
 
 ### Risk mitigation

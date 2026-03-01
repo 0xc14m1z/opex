@@ -13,31 +13,41 @@ calls. This gives us a single place to monitor, replay, and debug all agent inte
 
 ## Redis Streams Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         REDIS                                       │
-│                                                                     │
-│  ┌─ Pipeline Streams ─────────────────────────────────────────────┐ │
-│  │                                                                 │ │
-│  │  pipeline:{id}:tasks          Julius → Sherlock → Leonard      │ │
-│  │  pipeline:{id}:enriched       Sherlock → Leonard               │ │
-│  │  pipeline:{id}:reviews        Leonard → Katherine              │ │
-│  │  pipeline:{id}:git_ops        Any → Richelieu                  │ │
-│  │  pipeline:{id}:consensus      Any → Nelson                     │ │
-│  │  pipeline:{id}:consensus_resp Nelson → requester               │ │
-│  │                                                                 │ │
-│  └─────────────────────────────────────────────────────────────────┘ │
-│                                                                     │
-│  ┌─ System Streams ───────────────────────────────────────────────┐ │
-│  │                                                                 │ │
-│  │  logs                         All agents → TUI                 │ │
-│  │  costs                        All agents → TUI                 │ │
-│  │  status                       All agents → TUI                 │ │
-│  │  human_input                  TUI → agents                     │ │
-│  │  dead_letters                 Failed messages                  │ │
-│  │                                                                 │ │
-│  └─────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Redis
+        subgraph PipelineStreams["Pipeline Streams"]
+            tasks["pipeline:{id}:tasks"]
+            enriched["pipeline:{id}:enriched"]
+            reviews["pipeline:{id}:reviews"]
+            git_ops["pipeline:{id}:git_ops"]
+            consensus["pipeline:{id}:consensus"]
+            consensus_resp["pipeline:{id}:consensus_resp"]
+        end
+        subgraph SystemStreams["System Streams"]
+            logs["logs"]
+            costs["costs"]
+            status["status"]
+            human_input["human_input"]
+            dead_letters["dead_letters"]
+        end
+    end
+
+    Julius -->|task_created| tasks
+    tasks -->|task_created| Sherlock
+    Sherlock -->|task_enriched| enriched
+    enriched -->|task_enriched| Leonard
+    Leonard -->|implementation_complete| reviews
+    reviews -->|review_result| Katherine
+    Any -->|git_request| git_ops
+    git_ops -->|git_request| Richelieu
+    Any2[Any] -->|consensus_request| consensus
+    consensus -->|consensus_request| Nelson
+    Nelson -->|consensus_response| consensus_resp
+
+    AllAgents[All agents] --> logs & costs & status
+    logs & costs & status --> TUI
+    TUI -->|human_decision| human_input
 ```
 
 ## Stream Naming Convention
@@ -53,12 +63,12 @@ calls. This gives us a single place to monitor, replay, and debug all agent inte
 
 Redis Streams consumer groups enable parallel processing:
 
-```
-Stream: pipeline:pipe-7:enriched
-  └── Consumer Group: "leonard-workers"
-       ├── Consumer: leonard-1  (picks task A)
-       ├── Consumer: leonard-2  (picks task B)
-       └── Consumer: leonard-3  (picks task C)
+```mermaid
+flowchart TD
+    S["Stream: pipeline:pipe-7:enriched"] --> CG["Consumer Group: leonard-workers"]
+    CG --> C1["Consumer: leonard-1\n(picks task A)"]
+    CG --> C2["Consumer: leonard-2\n(picks task B)"]
+    CG --> C3["Consumer: leonard-3\n(picks task C)"]
 ```
 
 - **Single consumer**: Julius, Sherlock, Katherine (one instance each).

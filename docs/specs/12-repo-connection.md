@@ -12,53 +12,15 @@ for automated task intake from GitHub Issues.
 
 ## Connection Flow
 
-```
-User runs: make connect REPO=https://github.com/org/my-app
-
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│ 1. Authenticate with GitHub             │
-│    - Try GitHub App installation first  │
-│    - Fall back to PAT if no App         │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│ 2. Clone repo into /workspace volume    │
-│    - Shallow clone (--depth=1) for speed│
-│    - Full fetch if history needed later │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│ 3. Read .ai-team.yaml                  │
-│    - Validate against Pydantic schema   │
-│    - Error if missing or invalid        │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│ 4. Register webhook (if GitHub App)     │
-│    - Listen for: issues.opened,         │
-│      issues.labeled, issue_comment,     │
-│      pull_request.review_submitted      │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│ 5. Store connection in PostgreSQL        │
-│    - Repo URL, auth method, branch,     │
-│      config hash, connection timestamp  │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│ 6. Validate environment                 │
-│    - Run commands.install from config   │
-│    - Run commands.test to verify setup  │
-│    - Report any failures               │
-└─────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Start["User runs: make connect REPO=https://github.com/org/my-app"] --> A
+    A["1. Authenticate with GitHub\n- Try GitHub App installation first\n- Fall back to PAT if no App"] --> B
+    B["2. Clone repo into /workspace volume\n- Shallow clone (--depth=1) for speed\n- Full fetch if history needed later"] --> C
+    C["3. Read .ai-team.yaml\n- Validate against Pydantic schema\n- Error if missing or invalid"] --> D
+    D["4. Register webhook (if GitHub App)\n- Listen for: issues.opened,\nissues.labeled, issue_comment,\npull_request.review_submitted"] --> E
+    E["5. Store connection in PostgreSQL\n- Repo URL, auth method, branch,\nconfig hash, connection timestamp"] --> F
+    F["6. Validate environment\n- Run commands.install from config\n- Run commands.test to verify setup\n- Report any failures"]
 ```
 
 ## Authentication

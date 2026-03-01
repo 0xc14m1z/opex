@@ -31,27 +31,12 @@ configurable limits, and always escalate to a human on failure.
 
 ## Recovery Strategy
 
-```
-Agent encounters error
-        │
-        ▼
-┌─────────────────────┐
-│ Save checkpoint     │  (current state persisted to PostgreSQL)
-│ Log error           │  (full context including traceback)
-│ Notify human (TUI)  │  (banner: "Leonard-1 crashed on task #3")
-└────────┬────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│ Retry count < 3?    │
-│                     │
-│ YES → Restart from  │──── Resume from last checkpoint
-│       checkpoint    │     (not from scratch)
-│                     │
-│ NO  → Escalate to   │──── Task attempt marked as "failed"
-│       task-level     │     Orchestrator evaluates task-level retries
-│       retry (spec 01)│     (see spec 01 — Failure Handling)
-└─────────────────────┘
+```mermaid
+flowchart TD
+    A[Agent encounters error] --> B["Save checkpoint (PostgreSQL)\nLog error (full traceback)\nNotify human via TUI"]
+    B --> C{Retry count < 3?}
+    C -->|YES| D["Restart from checkpoint\n(resume, not from scratch)"]
+    C -->|NO| E["Escalate to task-level retry\nAttempt marked as failed\nOrchestrator evaluates task-level retries\n(see spec 01)"]
 ```
 
 ## Checkpoints

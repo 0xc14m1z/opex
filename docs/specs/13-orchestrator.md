@@ -542,106 +542,94 @@ class PipelineStatus(StrEnum):
 
 A 20-step walkthrough of a typical pipeline from plan submission to PR.
 
-```
- 1. Human submits plan via TUI/CLI
-    → TUI publishes `pipeline_created` to `system:pipelines`
+```mermaid
+sequenceDiagram
+    participant Human
+    participant TUI
+    participant Orch as Orchestrator
+    participant Redis
+    participant PG as PostgreSQL
+    participant Rich as Richelieu
+    participant Jul as Julius
+    participant Nel as Nelson
+    participant Sher as Sherlock
+    participant Leo as Leonard
+    participant Kat as Katherine
 
- 2. Orchestrator receives `pipeline_created`
-    → Creates pipeline record in PostgreSQL (status: CREATED)
-    → Spawns Richelieu to create feature branch
-    → Richelieu publishes `git_response` with branch name, exits
+    Note over Human, Kat: 1-2. Plan submission & pipeline creation
+    Human->>TUI: Submit plan
+    TUI->>Redis: pipeline_created
+    Orch->>PG: Create pipeline (CREATED)
+    Orch->>Rich: Spawn (create feature branch)
+    Rich->>Redis: git_response (branch name)
+    Rich--xRich: exits
 
- 3. Orchestrator receives `git_response` (feature branch ready)
-    → Updates pipeline status → DECOMPOSING
-    → Spawns Julius container (PIPELINE_ID env var)
+    Note over Human, Kat: 3-4. Decomposition
+    Orch->>PG: Status -> DECOMPOSING
+    Orch->>Jul: Spawn (PIPELINE_ID)
+    Jul->>Redis: consensus_request
+    Orch->>Nel: Spawn for validation
+    Nel->>Redis: consensus_response
+    Nel--xNel: exits
+    Jul->>Redis: task_created (x N)
+    Jul->>Redis: decomposition_complete
+    Jul--xJul: exits
 
- 4. Julius analyzes codebase, decomposes plan into tasks
-    → Publishes `consensus_request` to `pipeline:{id}:consensus`
-    → Orchestrator spawns Nelson for validation
-    → Nelson publishes `consensus_response`, exits
-    → Julius publishes all `task_created` messages to `pipeline:{id}:tasks`
-    → Julius publishes `decomposition_complete` to `pipeline:{id}:tasks`
-    → Julius container exits
+    Note over Human, Kat: 5-6. Dispatch & enrichment
+    Orch->>PG: Store DependencyGraph, status -> IN_PROGRESS
+    Orch->>Sher: Spawn for ready tasks (up to max_parallel)
+    Sher->>Redis: task_enriched
+    Sher--xSher: exits
 
- 5. Orchestrator receives `decomposition_complete`
-    → Stores DependencyGraph in PostgreSQL
-    → Updates pipeline status → IN_PROGRESS
-    → Calls `graph.get_ready_tasks()` to find tasks with no dependencies
-    → Spawns Sherlock containers for ready tasks (up to max_parallel)
-    → Publishes `batch_dispatched` to `pipeline:{id}:status`
+    Note over Human, Kat: 7-9. Worktree setup & implementation
+    Orch->>PG: Task status -> READY
+    Orch->>Rich: Spawn (create worktree)
+    Rich->>Redis: git_response (worktree path)
+    Rich--xRich: exits
+    Orch->>Leo: Spawn (TASK_ID, worktree, branch)
+    Leo->>Leo: Implement, test, lint, commit
+    Leo->>Redis: implementation_complete
+    Leo--xLeo: exits
 
- 6. Sherlock (per task) inspects codebase, produces execution plan
-    → May publish `consensus_request` → orchestrator spawns Nelson → Nelson responds, exits
-    → Publishes `task_enriched` to `pipeline:{id}:enriched`
-    → Container exits
+    Note over Human, Kat: 10-12. Review
+    Orch->>PG: Task status -> IN_REVIEW
+    Orch->>Kat: Spawn (TASK_ID)
+    Kat->>Redis: consensus_request
+    Orch->>Nel: Spawn for review
+    Nel->>Redis: consensus_response
+    Nel--xNel: exits
+    Kat->>Redis: review_result
+    Kat--xKat: exits
 
- 7. Orchestrator receives `task_enriched`
-    → Updates task status → READY
-    → Spawns Richelieu to create worktree
-    → Richelieu publishes `git_response` with worktree path and branch name, exits
+    alt approved
+        Orch->>Redis: git_request:merge_branch
+    else changes_requested
+        Orch->>PG: Task status -> REWORK
+        Note right of Orch: Respawn Leonard (go to step 9)
+    else escalated
+        Orch->>PG: Task status -> NEEDS_HUMAN
+        Orch->>Redis: escalation to human_input
+    end
 
- 8. Orchestrator receives `git_response` (worktree ready)
-    → Spawns Leonard container with TASK_ID, worktree path, branch name
+    Note over Human, Kat: 13-15. Merge & dependency dispatch
+    Orch->>Rich: Spawn (merge task -> feature branch)
+    Rich->>Redis: git_response (merge result)
+    Rich--xRich: exits
+    Orch->>PG: Task status -> COMPLETED
+    Orch->>Orch: Evaluate get_ready_tasks()
+    Note right of Orch: More ready -> spawn Sherlocks (step 6)<br/>All complete -> continue to step 16
 
- 9. Leonard implements code following Sherlock's execution plan
-    → Runs tests, lint, format (from .ai-team.yaml commands)
-    → Commits to task branch
-    → Publishes `implementation_complete` to `pipeline:{id}:reviews`
-    → Container exits
+    Note over Human, Kat: 16-19. Pipeline completion
+    Orch->>Redis: all_tasks_complete
+    Orch->>PG: Status -> COMPLETING
+    Orch->>Rich: Spawn (open PR: feature -> target)
+    Rich->>Redis: git_response (PR URL)
+    Rich--xRich: exits
+    Orch->>PG: Status -> COMPLETED
+    Orch->>Redis: pipeline_completed
 
-10. Orchestrator receives `implementation_complete`
-    → Updates task status → IN_REVIEW
-    → Spawns Katherine container with TASK_ID
-
-11. Katherine reviews the diff using Nelson consensus
-    → Publishes `consensus_request` → orchestrator spawns Nelson → Nelson responds, exits
-    → Publishes `review_result` to `pipeline:{id}:reviews`
-    → Container exits
-
-12. Orchestrator receives `review_result`
-    ├── decision: "approved"
-    │   → Publishes `git_request:merge_branch` to `pipeline:{id}:git_ops`
-    │
-    ├── decision: "changes_requested"
-    │   → Updates task status → REWORK
-    │   → Respawns Leonard with feedback attached
-    │   → Go to step 9
-    │
-    └── decision: "escalated"
-        → Updates task status → NEEDS_HUMAN
-        → Publishes escalation to `human_input`
-
-13. Orchestrator receives `git_request:merge_branch`
-    → Spawns Richelieu to merge task branch → feature branch
-    → Richelieu publishes `git_response` with merge result, exits
-
-14. Orchestrator receives `git_response` (merge success)
-    → Updates task status → COMPLETED
-    → Spawns Richelieu to remove worktree (`git_request:remove_worktree`)
-
-15. Orchestrator evaluates dependency graph
-    → Calls `graph.get_ready_tasks()` with updated statuses
-    ├── More tasks ready → Spawn Sherlocks (go to step 6)
-    └── No tasks ready + all tasks complete → Continue to step 16
-
-16. Orchestrator detects all tasks completed
-    → Publishes `all_tasks_complete` to `pipeline:{id}:status`
-
-17. Orchestrator transitions pipeline → COMPLETING
-    → Publishes `git_request:open_pr` to `pipeline:{id}:git_ops`
-
-18. Orchestrator spawns Richelieu to open PR
-    → Richelieu opens PR from feature branch → target branch
-    → Includes task summaries, review scores, cost summary in PR body
-    → Publishes `git_response` with PR URL and number
-    → Container exits
-
-19. Orchestrator receives `git_response` (PR opened)
-    → Updates pipeline status → COMPLETED
-    → Publishes `pipeline_completed` to `system:pipelines`
-
-20. Human reviews PR (if Katherine flagged it) or it auto-merges
-    → TUI shows pipeline summary with link to PR
+    Note over Human, Kat: 20. Human review
+    TUI->>Human: Pipeline summary with link to PR
 ```
 
 ---
@@ -650,49 +638,29 @@ A 20-step walkthrough of a typical pipeline from plan submission to PR.
 
 ### Scenario 1: Ephemeral agent crashes mid-task
 
-```
-Watchdog detects: no heartbeat for 90s OR container exited non-zero
-    │
-    ▼
-Check retry count for (agent, task_id)
-    │
-    ├── retries < 3 → Relaunch container from latest checkpoint
-    │                  (checkpoint data is passed via env/Redis)
-    │
-    └── retries >= 3 → Mark task as "needs_human"
-                        If task blocks others → mark dependents as "blocked"
-                        Emit status event for TUI
+```mermaid
+flowchart TD
+    A["Watchdog detects: no heartbeat for 90s\nOR container exited non-zero"] --> B{"Check retry count\nfor (agent, task_id)"}
+    B -->|"retries < 3"| C["Relaunch container from latest checkpoint\n(checkpoint data passed via env/Redis)"]
+    B -->|"retries >= 3"| D["Mark task as needs_human\nIf task blocks others: mark dependents as blocked\nEmit status event for TUI"]
 ```
 
 ### Scenario 2: Nelson crashes mid-consensus
 
-```
-Watchdog detects: Nelson container exited non-zero OR heartbeat gap > 90s
-    │
-    ▼
-Same as Scenario 1: check retry count
-    │
-    ├── retries < 3 → Respawn Nelson with same consensus_request
-    │
-    └── retries >= 3 → Return consensus_response with status="error"
-                        The requesting agent handles the error
-                        (typically: escalate to human)
+```mermaid
+flowchart TD
+    A["Watchdog detects: Nelson exited non-zero\nOR heartbeat gap > 90s"] --> B{Check retry count}
+    B -->|"retries < 3"| C[Respawn Nelson with same consensus_request]
+    B -->|"retries >= 3"| D["Return consensus_response with status=error\nRequesting agent handles the error\n(typically: escalate to human)"]
 ```
 
 ### Scenario 3: Richelieu crashes mid-operation
 
-```
-Watchdog detects: Richelieu container exited non-zero OR heartbeat gap > 90s
-    │
-    ▼
-Same as Scenario 1: check retry count
-    │
-    ├── retries < 3 → Respawn Richelieu with same git_request
-    │                  Git operations are idempotent (create branch
-    │                  that exists → no-op, etc.)
-    │
-    └── retries >= 3 → Mark task as "needs_human"
-                        Preserve branches for manual intervention
+```mermaid
+flowchart TD
+    A["Watchdog detects: Richelieu exited non-zero\nOR heartbeat gap > 90s"] --> B{Check retry count}
+    B -->|"retries < 3"| C["Respawn Richelieu with same git_request\n(git ops are idempotent)"]
+    B -->|"retries >= 3"| D["Mark task as needs_human\nPreserve branches for manual intervention"]
 ```
 
 > Since all agents are now ephemeral, Nelson and Richelieu follow the exact same
@@ -701,46 +669,31 @@ Same as Scenario 1: check retry count
 
 ### Scenario 4: Merge conflict on branch_merged
 
-```
-Richelieu reports: git_response with success=false, conflicts=[...]
-    │
-    ▼
-Orchestrator checks: is conflict auto-resolvable?
-    │
-    ├── YES → Richelieu retries with auto-resolve
-    │
-    └── NO → Mark task as "needs_human"
-             Preserve branches for manual resolution
-             Emit status event with conflicting files
+```mermaid
+flowchart TD
+    A["Richelieu reports: git_response\nsuccess=false, conflicts=[...]"] --> B{Is conflict auto-resolvable?}
+    B -->|YES| C[Richelieu retries with auto-resolve]
+    B -->|NO| D["Mark task as needs_human\nPreserve branches for manual resolution\nEmit status event with conflicting files"]
 ```
 
 ### Scenario 5: Budget exceeded during pipeline
 
-```
-Cost tracking (spec 07) fires: hard limit reached for task
-    │
-    ▼
-Orchestrator receives budget_exceeded event on status stream
-    │
-    ▼
-Stop the container running that task
-Mark task as "needs_human" with reason "budget_exceeded"
-Other tasks continue if they have independent budgets
+```mermaid
+flowchart TD
+    A["Cost tracking (spec 07) fires:\nhard limit reached for task"] --> B[Orchestrator receives budget_exceeded\nevent on status stream]
+    B --> C["Stop container running that task"]
+    C --> D["Mark task as needs_human\nreason: budget_exceeded"]
+    D --> E["Other tasks continue if they\nhave independent budgets"]
 ```
 
 ### Scenario 6: All LLM providers down
 
-```
-Nelson reports: consensus_response with status="error", all providers failed
-    │
-    ▼
-Orchestrator increments pipeline error counter
-    │
-    ├── < threshold → Wait, affected agents will retry via their own backoff
-    │
-    └── >= threshold → Pause pipeline (stop launching new containers)
-                        Alert human
-                        Resume when human confirms providers are back
+```mermaid
+flowchart TD
+    A["Nelson reports: consensus_response\nstatus=error, all providers failed"] --> B[Orchestrator increments\npipeline error counter]
+    B --> C{"Error count vs threshold"}
+    C -->|"< threshold"| D["Wait, affected agents retry\nvia their own backoff"]
+    C -->|">= threshold"| E["Pause pipeline\n(stop launching new containers)\nAlert human\nResume when human confirms providers are back"]
 ```
 
 ---
@@ -795,16 +748,16 @@ idempotent**:
 
 On startup, the orchestrator reconciles its state before entering the event loop:
 
-```
-1. Connect to PostgreSQL, load pipeline and container state
-2. List Docker containers with ai-team.* labels
-3. For each container found:
-   a. In DB + running     → adopt (update last_heartbeat timestamp)
-   b. In DB + stopped     → check exit code, process result if not already processed
-   c. Not in DB + running → stop and remove (orphan from previous crash)
-4. Process pending Redis entries (automatic via XREADGROUP with PEL)
-5. For PAUSED pipelines: check which tasks were interrupted, resume from checkpoint
-6. Start normal event loop + heartbeat loop
+```mermaid
+flowchart TD
+    A["1. Connect to PostgreSQL\nLoad pipeline and container state"] --> B["2. List Docker containers\nwith ai-team.* labels"]
+    B --> C{"3. For each container"}
+    C -->|"In DB + running"| D["Adopt\n(update last_heartbeat)"]
+    C -->|"In DB + stopped"| E["Check exit code\nProcess result if not already processed"]
+    C -->|"Not in DB + running"| F["Stop and remove\n(orphan from previous crash)"]
+    D & E & F --> G["4. Process pending Redis entries\n(automatic via XREADGROUP with PEL)"]
+    G --> H["5. For PAUSED pipelines:\ncheck interrupted tasks,\nresume from checkpoint"]
+    H --> I["6. Start normal event loop\n+ heartbeat loop"]
 ```
 
 ### Graceful SIGTERM (nice-to-have)

@@ -276,17 +276,15 @@ mounting the raw Docker socket (which grants full host-level Docker access), a
 
 ### Architecture
 
-```
-Orchestrator  ──TCP:2375──→  Docker Socket Proxy  ──unix──→  /var/run/docker.sock
-                           (tecnativa/docker-socket-proxy)
-                           Only allows:
-                           - Container create/start/stop/inspect/wait/remove
-                           Blocks:
-                           - Image build/push/pull
-                           - Network create/delete
-                           - Volume create/delete
-                           - Swarm operations
-                           - Exec into containers
+```mermaid
+flowchart LR
+    Orch[Orchestrator] -->|TCP:2375| Proxy["Docker Socket Proxy\n(tecnativa/docker-socket-proxy)"]
+    Proxy -->|unix socket| Sock["/var/run/docker.sock"]
+
+    Proxy -. "Allows:\n- Container create/start/stop/inspect/wait/remove" .-> Sock
+    Proxy -. "Blocks:\n- Image build/push/pull\n- Network create/delete\n- Volume create/delete\n- Swarm operations\n- Exec into containers" .-x Blocked[ ]
+
+    style Blocked fill:none,stroke:none
 ```
 
 The Docker Socket Proxy is configured in `docker-compose.yml` (see spec 05 for

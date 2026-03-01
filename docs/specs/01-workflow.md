@@ -20,11 +20,20 @@ For git operations (Richelieu), see spec 18.
 
 A pipeline transitions through these states:
 
-```
-CREATED → DECOMPOSING → IN_PROGRESS → COMPLETING → COMPLETED
-                                    ↘ PARTIALLY_FAILED → COMPLETED (after retry)
-                                                       → CANCELLED (human abandons)
-                                        CANCELLED (from any state, by human)
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED
+    CREATED --> DECOMPOSING
+    DECOMPOSING --> IN_PROGRESS
+    IN_PROGRESS --> COMPLETING
+    IN_PROGRESS --> PARTIALLY_FAILED
+    COMPLETING --> COMPLETED
+    PARTIALLY_FAILED --> COMPLETED : after retry
+    PARTIALLY_FAILED --> CANCELLED : human abandons
+    CREATED --> CANCELLED : human cancels
+    DECOMPOSING --> CANCELLED : human cancels
+    IN_PROGRESS --> CANCELLED : human cancels
+    COMPLETING --> CANCELLED : human cancels
 ```
 
 | Status | Description |
@@ -76,26 +85,28 @@ CREATED → DECOMPOSING → IN_PROGRESS → COMPLETING → COMPLETED
 
 ### Branching structure
 
-```
-main ─────────────────────────────────────────────────────────
-  │                              │
-  │  Feature A                   │  Feature B (parallel, independent)
-  │                              │
-  └── feature/add-auth           └── feature/fix-perf
-        │                              │
-        ├── ai-team/add-auth/task-1    ├── ai-team/fix-perf/task-4
-        │     PR #101 → feature/add-auth    PR #104 → feature/fix-perf
-        │                              │
-        ├── ai-team/add-auth/task-2    └── ai-team/fix-perf/task-5
-        │     PR #102 → feature/add-auth    PR #105 → feature/fix-perf
-        │
-        └── ai-team/add-auth/task-3
-              PR #103 → feature/add-auth
-              (depends on task-1, branches
-               AFTER PR #101 merges)
+```mermaid
+flowchart TD
+    main[main]
 
-All task PRs merged → PR #106: feature/add-auth → main
-All task PRs merged → PR #107: feature/fix-perf → main
+    main --> FA[feature/add-auth]
+    main --> FB[feature/fix-perf]
+
+    FA --> T1["ai-team/add-auth/task-1\nPR #101 -> feature/add-auth"]
+    FA --> T2["ai-team/add-auth/task-2\nPR #102 -> feature/add-auth"]
+    FA --> T3["ai-team/add-auth/task-3\nPR #103 -> feature/add-auth\n(depends on task-1, branches\nAFTER PR #101 merges)"]
+
+    FB --> T4["ai-team/fix-perf/task-4\nPR #104 -> feature/fix-perf"]
+    FB --> T5["ai-team/fix-perf/task-5\nPR #105 -> feature/fix-perf"]
+
+    FA -->|"All task PRs merged"| PR106["PR #106: feature/add-auth -> main"]
+    FB -->|"All task PRs merged"| PR107["PR #107: feature/fix-perf -> main"]
+
+    Note1["Feature A"] -.- FA
+    Note2["Feature B (parallel, independent)"] -.- FB
+
+    style Note1 fill:none,stroke:none
+    style Note2 fill:none,stroke:none
 ```
 
 ### Branching rules
@@ -133,25 +144,16 @@ All task PRs merged → PR #107: feature/fix-perf → main
 When parallel task PRs target the same feature branch, merging one may cause
 the other to become outdated or have conflicts.
 
-```
-Task-1 PR merges into feature/add-auth
-    │
-    ▼
-Orchestrator detects task-2 PR is outdated
-    │
-    ▼
-Spawns Richelieu to rebase task-2 onto feature/add-auth
-    │
-    ├── Rebase succeeds → force-push (task branch is AI-owned, safe)
-    │                      PR auto-updates on GitHub
-    │
-    └── Rebase conflicts → Richelieu attempts auto-resolution
-                           │
-                           ├── Auto-resolve succeeds → force-push
-                           │
-                           └── Auto-resolve fails → mark task "needs_human"
-                                                      Preserve branches
-                                                      Emit status event with conflicting files
+```mermaid
+flowchart TD
+    A[Task-1 PR merges into feature/add-auth] --> B[Orchestrator detects task-2 PR is outdated]
+    B --> C[Spawns Richelieu to rebase task-2 onto feature/add-auth]
+    C --> D{Rebase result}
+    D -->|Succeeds| E[Force-push\nPR auto-updates on GitHub]
+    D -->|Conflicts| F[Richelieu attempts auto-resolution]
+    F --> G{Auto-resolve result}
+    G -->|Succeeds| H[Force-push]
+    G -->|Fails| I[Mark task needs_human\nPreserve branches\nEmit status event with conflicting files]
 ```
 
 Katherine re-reviews if the rebase changed code (not just a clean fast-forward).
@@ -243,56 +245,60 @@ queues them and launches as slots become available.
 
 Each task in a pipeline transitions through these states:
 
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> ENRICHING : Sherlock runs
+    ENRICHING --> READY : worktree created
+    READY --> IMPLEMENTING : Leonard runs
+    IMPLEMENTING --> IN_REVIEW : Katherine runs
+    IN_REVIEW --> MERGING : approved
+    MERGING --> COMPLETED : unblock dependents, evaluate graph
+    IN_REVIEW --> REWORK : changes_requested
+    REWORK --> IMPLEMENTING : review loop
+    IN_REVIEW --> NEEDS_HUMAN : escalated (auto-retries exhausted)
+
+    state NEEDS_HUMAN {
+        direction LR
+        [*] --> Investigate
+        [*] --> TakeOver
+        [*] --> CancelPipeline
+    }
+
+    Investigate --> DiagnosticChat
+    state DiagnosticChat {
+        direction LR
+        [*] --> AddContext
+        [*] --> EditTask
+    }
+    AddContext --> RETRYING_ctx
+    EditTask --> RETRYING_edit
+    state RETRYING_ctx <<choice>>
+    state RETRYING_edit <<choice>>
+    RETRYING_ctx --> ENRICHING : new attempt
+    RETRYING_edit --> ENRICHING : new attempt
+
+    TakeOver --> ABANDONED_HUMAN_TAKEOVER
+    ABANDONED_HUMAN_TAKEOVER --> VerifyPrereqs : Human says I'm done
+    state VerifyPrereqs <<choice>>
+    VerifyPrereqs --> COMPLETED_EXTERNALLY : all checks pass
+    VerifyPrereqs --> ABANDONED_HUMAN_TAKEOVER : some checks fail
+
+    CancelPipeline --> CANCELLED
+
+    COMPLETED --> [*]
+    COMPLETED_EXTERNALLY --> [*]
+    CANCELLED --> [*]
 ```
-PENDING
-  │
-  ▼
-ENRICHING (Sherlock running)
-  │
-  ▼
-READY (worktree created)
-  │
-  ▼
-IMPLEMENTING (Leonard running)
-  │
-  ▼
-IN_REVIEW (Katherine running)
-  │
-  ├── approved → MERGING → COMPLETED → (unblock dependents, evaluate graph)
-  │
-  ├── changes_requested → REWORK → IMPLEMENTING (review loop)
-  │
-  └── escalated (auto-retries exhausted) → NEEDS_HUMAN
-                                              │
-                                ┌──────────────┼───────────────────┐
-                                ▼              ▼                   ▼
-                          [Investigate]   [Take over]        [Cancel pipeline]
-                               │              │
-                               ▼              ▼
-                       Diagnostic chat   ABANDONED_HUMAN_TAKEOVER
-                               │              │
-                     ┌─────────┴──────┐    Human: "I'm done"
-                     ▼                ▼       │
-               Add context      Edit task    Katherine verifies
-                     │                │       │
-                     ▼                ▼    ┌──┴──┐
-                  RETRYING         RETRYING │    │
-                     │                │   pass  fail
-                     ▼                ▼    │    │
-                  ENRICHING       ENRICHING │    └→ stays, report back
-                  (new attempt)            ▼
-                                    COMPLETED_EXTERNALLY
-                                    (unblocks dependents)
 
 Terminal states:
-  COMPLETED              — system finished the task
-  COMPLETED_EXTERNALLY   — human finished the task, Katherine verified
-  CANCELLED              — human cancelled the pipeline
+- `COMPLETED` -- system finished the task
+- `COMPLETED_EXTERNALLY` -- human finished the task, Katherine verified
+- `CANCELLED` -- human cancelled the pipeline
 
 Non-terminal waiting states:
-  NEEDS_HUMAN                — waiting for human decision
-  ABANDONED_HUMAN_TAKEOVER   — human took over, doing work externally
-```
+- `NEEDS_HUMAN` -- waiting for human decision
+- `ABANDONED_HUMAN_TAKEOVER` -- human took over, doing work externally
 
 > **Design principle (P8 — No Silent Failures):** There is no automatic
 > `FAILED` terminal state for tasks. When auto-retries are exhausted, the
@@ -437,23 +443,20 @@ as `entry_type: 'task_edit'` in the context history.
 
 The human decides to do the work themselves outside the system.
 
-```
-Task → ABANDONED_HUMAN_TAKEOVER
-    │
-    (human works outside the system)
-    │
-    Human returns to TUI: "I'm done"
-    │
-    ▼
-Katherine runs in verify_prerequisites mode:
-    ├── Does the expected branch exist?
-    ├── Are the changes committed and pushed?
-    ├── Do the tests pass? (from .ai-team.yaml commands)
-    ├── Does lint pass?
-    ├── Are the dependent tasks' requirements met?
-    │
-    ├── All checks pass → COMPLETED_EXTERNALLY (dependents unblocked)
-    └── Some checks fail → stays ABANDONED_HUMAN_TAKEOVER (report to human)
+```mermaid
+flowchart TD
+    A[Task] --> B[ABANDONED_HUMAN_TAKEOVER]
+    B --> C[Human works outside the system]
+    C --> D["Human returns to TUI: I'm done"]
+    D --> E["Katherine runs in verify_prerequisites mode"]
+    E --> F{Branch exists?}
+    E --> G{Changes committed and pushed?}
+    E --> H{Tests pass?}
+    E --> I{Lint pass?}
+    E --> J{Dependent tasks' requirements met?}
+    F & G & H & I & J --> K{All checks pass?}
+    K -->|Yes| L[COMPLETED_EXTERNALLY\ndependents unblocked]
+    K -->|No| M[Stays ABANDONED_HUMAN_TAKEOVER\nreport to human]
 ```
 
 Katherine's `verify_prerequisites` mode is a reusable capability — a
@@ -464,20 +467,14 @@ performing a full review cycle. See spec 21 for Katherine's modes.
 
 The human decides the whole feature isn't worth pursuing.
 
-```
-Pipeline → CANCELLED
-    │
-    All running tasks → CANCELLED
-    All pending tasks → CANCELLED
-    │
-    Cancellation record stored:
-      - reason (human-provided text via TUI)
-      - which tasks completed vs. were in-progress
-      - what branches/PRs exist
-      - timestamp
-    │
-    Branches/PRs are NOT auto-deleted (human may want to salvage).
-    Cleanup available via TUI command or TTL auto-cleanup.
+```mermaid
+flowchart TD
+    A[Pipeline] --> B[CANCELLED]
+    B --> C[All running tasks --> CANCELLED]
+    B --> D[All pending tasks --> CANCELLED]
+    C & D --> E[Cancellation record stored]
+    E --> F["- reason (human-provided text via TUI)\n- which tasks completed vs. in-progress\n- what branches/PRs exist\n- timestamp"]
+    F --> G["Branches/PRs NOT auto-deleted\n(human may want to salvage)\nCleanup via TUI command or TTL auto-cleanup"]
 ```
 
 ---
@@ -504,104 +501,92 @@ is stored in the pipeline record in PostgreSQL.
 
 A 20-step walkthrough of a typical pipeline from plan submission to PR.
 
-```
- 1. Human submits plan via TUI/CLI
-    → TUI publishes `pipeline_created` to `system:pipelines`
+```mermaid
+sequenceDiagram
+    participant Human
+    participant TUI
+    participant Orch as Orchestrator
+    participant Redis
+    participant PG as PostgreSQL
+    participant Rich as Richelieu
+    participant Jul as Julius
+    participant Nel as Nelson
+    participant Sher as Sherlock
+    participant Leo as Leonard
+    participant Kat as Katherine
 
- 2. Orchestrator receives `pipeline_created`
-    → Creates pipeline record in PostgreSQL (status: CREATED)
-    → Spawns Richelieu to create feature branch
-    → Richelieu publishes `git_response` with branch name, exits
+    Note over Human, Kat: 1-2. Plan submission & pipeline creation
+    Human->>TUI: Submit plan
+    TUI->>Redis: pipeline_created
+    Orch->>PG: Create pipeline (CREATED)
+    Orch->>Rich: Spawn (create feature branch)
+    Rich->>Redis: git_response (branch name)
+    Rich--xRich: exits
 
- 3. Orchestrator receives `git_response` (feature branch ready)
-    → Updates pipeline status → DECOMPOSING
-    → Spawns Julius container (PIPELINE_ID env var)
+    Note over Human, Kat: 3-4. Decomposition
+    Orch->>PG: Status -> DECOMPOSING
+    Orch->>Jul: Spawn (PIPELINE_ID)
+    Jul->>Redis: consensus_request
+    Orch->>Nel: Spawn for validation
+    Nel->>Redis: consensus_response
+    Nel--xNel: exits
+    Jul->>Redis: task_created (x N)
+    Jul->>Redis: decomposition_complete
+    Jul--xJul: exits
 
- 4. Julius analyzes codebase, decomposes plan into tasks
-    → Publishes `consensus_request` to `pipeline:{id}:consensus`
-    → Orchestrator spawns Nelson for validation
-    → Nelson publishes `consensus_response`, exits
-    → Julius publishes all `task_created` messages to `pipeline:{id}:tasks`
-    → Julius publishes `decomposition_complete` to `pipeline:{id}:tasks`
-    → Julius container exits
+    Note over Human, Kat: 5-6. Dispatch & enrichment
+    Orch->>PG: Store DependencyGraph, status -> IN_PROGRESS
+    Orch->>Sher: Spawn for ready tasks (up to max_parallel)
+    Sher->>Redis: task_enriched
+    Sher--xSher: exits
 
- 5. Orchestrator receives `decomposition_complete`
-    → Stores DependencyGraph in PostgreSQL
-    → Updates pipeline status → IN_PROGRESS
-    → Calls `graph.get_ready_tasks()` to find tasks with no dependencies
-    → Spawns Sherlock containers for ready tasks (up to max_parallel)
-    → Publishes `batch_dispatched` to `pipeline:{id}:status`
+    Note over Human, Kat: 7-9. Worktree setup & implementation
+    Orch->>PG: Task status -> READY
+    Orch->>Rich: Spawn (create worktree)
+    Rich->>Redis: git_response (worktree path)
+    Rich--xRich: exits
+    Orch->>Leo: Spawn (TASK_ID, worktree, branch)
+    Leo->>Leo: Implement, test, lint, commit
+    Leo->>Redis: implementation_complete
+    Leo--xLeo: exits
 
- 6. Sherlock (per task) inspects codebase, produces execution plan
-    → May publish `consensus_request` → orchestrator spawns Nelson → Nelson responds, exits
-    → Publishes `task_enriched` to `pipeline:{id}:enriched`
-    → Container exits
+    Note over Human, Kat: 10-12. Review
+    Orch->>PG: Task status -> IN_REVIEW
+    Orch->>Kat: Spawn (TASK_ID)
+    Kat->>Redis: consensus_request
+    Orch->>Nel: Spawn for review
+    Nel->>Redis: consensus_response
+    Nel--xNel: exits
+    Kat->>Redis: review_result
+    Kat--xKat: exits
 
- 7. Orchestrator receives `task_enriched`
-    → Updates task status → READY
-    → Spawns Richelieu to create worktree
-    → Richelieu publishes `git_response` with worktree path and branch name, exits
+    alt approved
+        Orch->>Redis: git_request:merge_branch
+    else changes_requested
+        Orch->>PG: Task status -> REWORK
+        Note right of Orch: Respawn Leonard (go to step 9)
+    else escalated
+        Orch->>PG: Task status -> NEEDS_HUMAN
+        Orch->>Redis: escalation to human_input
+    end
 
- 8. Orchestrator receives `git_response` (worktree ready)
-    → Spawns Leonard container with TASK_ID, worktree path, branch name
+    Note over Human, Kat: 13-15. Merge & dependency dispatch
+    Orch->>Rich: Spawn (merge task -> feature branch)
+    Rich->>Redis: git_response (merge result)
+    Rich--xRich: exits
+    Orch->>PG: Task status -> COMPLETED
+    Orch->>Orch: Evaluate get_ready_tasks()
+    Note right of Orch: More ready -> spawn Sherlocks (step 6)<br/>All complete -> continue to step 16
 
- 9. Leonard implements code following Sherlock's execution plan
-    → Runs tests, lint, format (from .ai-team.yaml commands)
-    → Commits to task branch
-    → Publishes `implementation_complete` to `pipeline:{id}:reviews`
-    → Container exits
+    Note over Human, Kat: 16-19. Pipeline completion
+    Orch->>Redis: all_tasks_complete
+    Orch->>PG: Status -> COMPLETING
+    Orch->>Rich: Spawn (open PR: feature -> target)
+    Rich->>Redis: git_response (PR URL)
+    Rich--xRich: exits
+    Orch->>PG: Status -> COMPLETED
+    Orch->>Redis: pipeline_completed
 
-10. Orchestrator receives `implementation_complete`
-    → Updates task status → IN_REVIEW
-    → Spawns Katherine container with TASK_ID
-
-11. Katherine reviews the diff using Nelson consensus
-    → Publishes `consensus_request` → orchestrator spawns Nelson → Nelson responds, exits
-    → Publishes `review_result` to `pipeline:{id}:reviews`
-    → Container exits
-
-12. Orchestrator receives `review_result`
-    ├── decision: "approved"
-    │   → Publishes `git_request:merge_branch` to `pipeline:{id}:git_ops`
-    │
-    ├── decision: "changes_requested"
-    │   → Updates task status → REWORK
-    │   → Respawns Leonard with feedback attached
-    │   → Go to step 9
-    │
-    └── decision: "escalated"
-        → Updates task status → NEEDS_HUMAN
-        → Publishes escalation to `human_input`
-
-13. Orchestrator receives `git_request:merge_branch`
-    → Spawns Richelieu to merge task branch → feature branch
-    → Richelieu publishes `git_response` with merge result, exits
-
-14. Orchestrator receives `git_response` (merge success)
-    → Updates task status → COMPLETED
-    → Spawns Richelieu to remove worktree (`git_request:remove_worktree`)
-
-15. Orchestrator evaluates dependency graph
-    → Calls `graph.get_ready_tasks()` with updated statuses
-    ├── More tasks ready → Spawn Sherlocks (go to step 6)
-    └── No tasks ready + all tasks complete → Continue to step 16
-
-16. Orchestrator detects all tasks completed
-    → Publishes `all_tasks_complete` to `pipeline:{id}:status`
-
-17. Orchestrator transitions pipeline → COMPLETING
-    → Publishes `git_request:open_pr` to `pipeline:{id}:git_ops`
-
-18. Orchestrator spawns Richelieu to open PR
-    → Richelieu opens PR from feature branch → target branch
-    → Includes task summaries, review scores, cost summary in PR body
-    → Publishes `git_response` with PR URL and number
-    → Container exits
-
-19. Orchestrator receives `git_response` (PR opened)
-    → Updates pipeline status → COMPLETED
-    → Publishes `pipeline_completed` to `system:pipelines`
-
-20. Human reviews PR (if Katherine flagged it) or it auto-merges
-    → TUI shows pipeline summary with link to PR
+    Note over Human, Kat: 20. Human review
+    TUI->>Human: Pipeline summary with link to PR
 ```

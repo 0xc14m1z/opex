@@ -13,17 +13,20 @@ responses via VCR cassettes (recorded once, replayed deterministically), and ful
 
 ## Test Pyramid
 
-```
-        ╱╲
-       ╱  ╲          E2E Tests
-      ╱ E2E╲         All agents as containers, real repo, VCR cassettes
-     ╱──────╲         (CI: separate stage, nightly or manual trigger)
-    ╱        ╲
-   ╱Integration╲     Integration Tests
-  ╱──────────────╲    Full docker compose up — Redis, PostgreSQL, Loki, Grafana
- ╱                ╲
-╱   Unit Tests     ╲  Unit Tests
-╱───────────────────╲  testcontainers (Redis + PostgreSQL), VCR cassettes for LLM
+```mermaid
+%%{init: {"theme": "base"}}%%
+block-beta
+    columns 1
+    block:e2e["E2E Tests\nAll agents as containers, real repo, VCR cassettes\n(CI: nightly or manual)"]
+    end
+    block:integration["Integration Tests\nFull docker compose up -- Redis, PostgreSQL, Loki, Grafana"]
+    end
+    block:unit["Unit Tests\ntestcontainers (Redis + PostgreSQL), VCR cassettes for LLM"]
+    end
+
+    style e2e fill:#f9d,stroke:#333
+    style integration fill:#fd9,stroke:#333
+    style unit fill:#9df,stroke:#333
 ```
 
 | Layer        | LLM Calls      | Redis              | PostgreSQL          | Docker   | Speed    | CI Stage           |
