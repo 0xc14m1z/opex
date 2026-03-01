@@ -23,7 +23,7 @@ Richelieu is one of only two agents with write access to the filesystem
 - **Task branch push**: Push task branches to GitHub.
 - **PR opening**: Open task PRs (task branch -> feature branch) and feature PRs (feature branch -> default branch).
 - **Branch merging**: Merge task branches into the feature branch after Katherine approves.
-- **Conflict resolution**: Detect merge conflicts. Attempt rebase + auto-resolution. Escalate to human if manual intervention is needed.
+- **Conflict resolution**: Detect merge conflicts. Resolve trivial conflicts mechanically (imports, whitespace, non-overlapping hunks). For semantic conflicts, report conflict details so the orchestrator can spawn Leonard to resolve.
 - **Branch alignment**: When a task PR is merged, rebase other in-progress task branches onto the updated feature branch.
 - **Repo fetching**: Run `git fetch origin` at pipeline start to ensure the latest state.
 
@@ -92,9 +92,9 @@ Richelieu implements each operation.
 4. If merge conflicts:
    - Attempt rebase of task branch onto feature branch.
    - If rebase succeeds: force-push (task branch is AI-owned, safe).
-   - If rebase conflicts: attempt auto-resolution.
-   - If auto-resolve succeeds: force-push.
-   - If auto-resolve fails: publish `git_response` with `success=false` and conflict details.
+   - If rebase conflicts: classify each conflicting hunk as trivial or semantic.
+     - **Trivial** (non-overlapping hunks, import ordering, whitespace, formatting): resolve mechanically and force-push.
+     - **Semantic** (both sides modified the same logic): publish `git_response` with `success=false`, `conflict_type=semantic`, and conflict details (files, hunks, both sides of the diff). The orchestrator spawns Leonard to resolve (see spec 20).
 5. Publish `git_response` with merge result.
 
 ### Operation: `open_task_pr`
@@ -118,7 +118,7 @@ Triggered when a task PR merges and other in-progress task branches need updatin
 1. Fetch the updated feature branch.
 2. Rebase the target task branch onto the updated feature branch.
 3. If rebase succeeds: force-push (task branch is AI-owned).
-4. If rebase conflicts: attempt auto-resolution; escalate if needed.
+4. If rebase conflicts: classify as trivial or semantic (same logic as `merge_branch` step 4). Trivial conflicts are resolved mechanically. Semantic conflicts are reported to the orchestrator, which spawns Leonard to resolve.
 5. If code changed (not just fast-forward), flag for Katherine re-review.
 
 ### Operation: `remove_worktree`
@@ -213,9 +213,8 @@ Katherine re-reviews if the rebase changed code (not just a clean fast-forward).
 ## Interaction with Other Agents
 
 - **Orchestrator (spec 13-orchestrator)**: The orchestrator dispatches all `git_request` messages and consumes `git_response` results. The orchestrator serializes operations per-branch.
-- **Leonard (spec 20-leonard)**: Leonard works within the worktree that Richelieu provisions. Leonard commits to the task branch; Richelieu handles everything else (push, merge, PR).
-- **Katherine (spec 21)**: After Katherine approves, the orchestrator tells Richelieu to merge. If rebase changes code, Katherine re-reviews.
-- **Nelson (spec 16)**: Richelieu may request Nelson consensus on conflict resolution strategy in complex cases (rare).
+- **Leonard (spec 20-leonard)**: Leonard works within the worktree that Richelieu provisions. Leonard commits to the task branch; Richelieu handles everything else (push, merge, PR). For semantic merge conflicts, the orchestrator spawns Leonard to resolve — Leonard has the LLM and codebase understanding that Richelieu lacks.
+- **Katherine (spec 21)**: After Katherine approves, the orchestrator tells Richelieu to merge. If rebase changes code (including conflict resolution), Katherine re-reviews.
 
 ---
 
@@ -266,7 +265,8 @@ Expected tools:
 
 ## Error Handling
 
-- **Merge conflict (unresolvable)**: Mark task as `needs_human`. Preserve all branches and worktrees for manual intervention. Emit status event with conflicting file list.
+- **Trivial merge conflict**: Richelieu resolves mechanically (imports, whitespace, non-overlapping hunks) and force-pushes.
+- **Semantic merge conflict**: Richelieu reports conflict details to the orchestrator, which spawns Leonard to resolve. If Leonard also fails, the task is marked `needs_human`. Branches and worktrees are preserved for manual intervention.
 - **GitHub API failure**: Retry with exponential backoff up to 3 times. If persistent, escalate to human.
 - **Container crash**: The orchestrator respawns Richelieu with the same `git_request`. Git operations are idempotent (create branch that exists -> no-op, etc.).
 - **Push rejected**: If a push is rejected (e.g., branch protection), report the error and escalate to human.

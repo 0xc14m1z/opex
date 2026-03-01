@@ -162,12 +162,20 @@ flowchart TD
     A[Task-1 PR merges into feature/add-auth] --> B[Orchestrator detects task-2 PR is outdated]
     B --> C[Spawns Richelieu to rebase task-2 onto feature/add-auth]
     C --> D{Rebase result}
-    D -->|Succeeds| E[Force-push\nPR auto-updates on GitHub]
-    D -->|Conflicts| F[Richelieu attempts auto-resolution]
-    F --> G{Auto-resolve result}
-    G -->|Succeeds| H[Force-push]
-    G -->|Fails| I[Mark task needs_human\nPreserve branches\nEmit status event with conflicting files]
+    D -->|Clean rebase| E[Force-push\nPR auto-updates on GitHub]
+    D -->|Trivial conflicts\nimports, whitespace| F[Richelieu resolves mechanically]
+    F --> G[Force-push]
+    D -->|Semantic conflicts| H[Richelieu reports conflict details\nto orchestrator]
+    H --> I[Orchestrator spawns Leonard\nwith both sides of the conflict]
+    I --> J{Leonard resolves}
+    J -->|Succeeds| K[Leonard commits resolution\nRichelieu force-pushes]
+    J -->|Fails| L[Mark task needs_human\nPreserve branches\nEmit status event with conflicting files]
 ```
+
+Richelieu handles trivial conflicts (non-overlapping hunks, imports, whitespace) mechanically.
+For semantic conflicts — where both sides modified the same logic — the orchestrator spawns
+Leonard with the conflict context (both diffs, both tasks' execution plans). Leonard has the
+LLM and codebase understanding to reason about the correct resolution.
 
 Katherine re-reviews if the rebase changed code (not just a clean fast-forward).
 

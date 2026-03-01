@@ -26,6 +26,7 @@ by Richelieu.
 - Run a code simplification pass (reduce unnecessary complexity).
 - Commit changes with conventional commit messages.
 - Handle rework: when Katherine requests changes, Leonard receives feedback and iterates.
+- Resolve semantic merge conflicts: when Richelieu detects a conflict it cannot resolve mechanically, the orchestrator spawns Leonard with both sides of the conflict and the relevant tasks' execution plans. Leonard uses its LLM and codebase understanding to produce the correct resolution.
 - In learning mode, Leonard's implementation may be deleted and replayed from scratch with new principles.
 
 ---
@@ -115,7 +116,7 @@ When learning mode is active (see spec 03):
 
 - **Sherlock (spec 19)**: Leonard's primary input is Sherlock's execution plan. The plan contains everything Leonard needs to implement the task.
 - **Katherine (spec 21)**: Katherine reviews Leonard's implementation. If changes are requested, Leonard receives the feedback and iterates (rework loop).
-- **Richelieu (spec 18)**: Richelieu provisions the worktree and branch before Leonard starts. Leonard commits to the task branch; Richelieu handles push, merge, and PR operations.
+- **Richelieu (spec 18)**: Richelieu provisions the worktree and branch before Leonard starts. Leonard commits to the task branch; Richelieu handles push, merge, and PR operations. When Richelieu encounters a semantic merge conflict it cannot resolve mechanically, the orchestrator spawns Leonard with the conflict context (both diffs, both tasks' execution plans) to produce the resolution.
 - **Nelson (spec 16)**: Leonard does not typically call Nelson directly. However, in rare cases where the implementation approach is unclear despite Sherlock's plan, Leonard may request consensus.
 - **Orchestrator (spec 13-orchestrator)**: The orchestrator spawns Leonard, monitors its health, and handles retries on failure.
 
