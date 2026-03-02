@@ -92,40 +92,151 @@ Every failure escalates to a human with full context — the system never silent
 
 ## Configuration
 
-Drop an `.opex.yaml` in your target repository:
+Drop an `.opex.yaml` in your target repository. This is the **repo-owner's** configuration
+— it controls how Opex behaves for this specific project. System-level secrets (API keys,
+credentials) live in `.env` instead.
+
+### Full example
 
 ```yaml
 version: "1"
 
+# ── Project metadata ──────────────────────────────────────────────
 project:
   name: "my-app"
+  description: "E-commerce API backend"
   language: "python"
-  framework: "fastapi"
+  framework: "fastapi"          # optional
+  python_version: "3.12"        # optional
 
+# ── Codebase knowledge ────────────────────────────────────────────
+knowledge:
+  architecture_docs: "docs/architecture.md"
+  api_docs: "docs/api/"
+  style_guide: "CONTRIBUTING.md"
+  adr_directory: "docs/adr/"
+  additional:
+    - "docs/patterns.md"
+    - "docs/conventions.md"
+
+# ── Commands agents execute ───────────────────────────────────────
 commands:
   install: "uv sync"
   test: "uv run pytest"
-  lint: "uv run ruff check ."
+  lint: "uv run ruff check ."         # optional
+  format: "uv run ruff format ."      # optional
+  type_check: "uv run mypy src/"      # optional
+  build: "uv run python -m build"     # optional
+  custom:                              # optional, arbitrary commands
+    migrate: "alembic upgrade head"
 
-llm:
-  default_model: provider/model-name
-  consensus:
-    models:
-      - provider-a/model-1
-      - provider-b/model-2
-      - provider-c/model-3
+# ── Coding guidelines ─────────────────────────────────────────────
+guidelines:
+  - "All functions must have type annotations"
+  - "Use dependency injection, no global state"
+  - "Every endpoint must have an integration test"
 
-budget:
-  soft_limit: 5.00
-  hard_limit: 20.00
+# ── Protected paths (agents cannot modify) ────────────────────────
+protected_paths:
+  - "migrations/"
+  - "infrastructure/"
+  - ".github/"
 
+# ── Git behavior ──────────────────────────────────────────────────
+git:
+  default_branch: "main"
+  branch_prefix: "opex/"              # prefix for AI-created branches
+  require_pr: true                    # never push directly to default branch
+  auto_merge: false                   # auto-merge approved PRs
+  conventional_commits: true          # enforce feat:, fix:, etc.
+
+# ── Review and confidence scoring ─────────────────────────────────
 review:
-  confidence_threshold: 0.7
+  confidence_threshold: 0.7           # below this → human review required
+  always_human_review:                # paths that always need human eyes
+    - "migrations/"
+    - "*.sql"
+  never_auto_approve:                 # high-confidence changes still flagged
+    - "security-related changes"
+
+# ── GitHub issue intake ───────────────────────────────────────────
+intake:
+  labels:
+    trigger: "opex"                   # label that triggers task creation
+    in_progress: "opex:working"
+    done: "opex:done"
+    needs_human: "opex:needs-human"
+  issue_template: null                # optional markdown template
+
+# ── Budget (per-task, in USD) ─────────────────────────────────────
+budget:
+  soft_limit_per_task: 5.00           # warning threshold
+  hard_limit_per_task: 20.00          # hard stop
+  # Daily hard limit is set via DAILY_BUDGET_HARD in .env (system-level)
+
+# ── Task retries ──────────────────────────────────────────────────
+retries:
+  max_task_retries: 2                 # 2 retries = 3 total attempts
+  cleanup_ttl_hours: 48               # auto-cleanup failed branches
+
+# ── LLM models ────────────────────────────────────────────────────
+llm:
+  default_model: "anthropic/claude-sonnet-4"
+  consensus:
+    models:                           # min 2 for meaningful consensus
+      - "anthropic/claude-sonnet-4"
+      - "openai/gpt-4o"
+      - "google/gemini-2.0-flash"
+    max_rounds: 3                     # max cross-review iterations
+  overrides:                          # per-agent model overrides
+    leonard: "anthropic/claude-sonnet-4"
+
+# ── Resource limits (per-agent overrides) ─────────────────────────
+resources:
+  leonard:
+    cpu_limit: 2.0
+    memory_limit: "4G"
+  sherlock:
+    cpu_limit: 1.0
+    memory_limit: "2G"
+
+# ── Secret allowlist extensions ───────────────────────────────────
+secrets:
+  leonard:
+    additional: ["CUSTOM_API_KEY"]    # extra env vars for this agent
+
+# ── Learning mode ─────────────────────────────────────────────────
+learning:
+  enabled: true                       # enable for new pipelines
+  auto_disable_after: null            # auto-disable after N tasks
 ```
+
+### Section reference
+
+| Section | Purpose | Required |
+|---|---|---|
+| `project` | Project metadata — name, language, framework | Yes |
+| `knowledge` | Paths to architecture docs, style guides, ADRs for agent context | No |
+| `commands` | Shell commands agents run (install, test, lint, format, etc.) | Yes (`install`, `test`) |
+| `guidelines` | Coding rules agents must follow | No |
+| `protected_paths` | Files/directories agents cannot modify | No |
+| `git` | Branch prefix, default branch, PR and commit conventions | No |
+| `review` | Confidence threshold, paths requiring human review | No |
+| `intake` | GitHub issue labels that trigger/track pipelines | No |
+| `budget` | Per-task soft/hard cost limits in USD | No |
+| `retries` | Max task retries and failed-branch cleanup TTL | No |
+| `llm` | Default model, consensus model list, per-agent overrides | No |
+| `resources` | Per-agent CPU/memory limits (overrides infrastructure defaults) | No |
+| `secrets` | Per-agent additional environment variable allowlists | No |
+| `learning` | Learning mode toggle and auto-disable threshold | No |
+
+All model IDs use OpenRouter format: `{provider}/{model-name}`.
+
+See [`docs/specs/12-repo-connection.md`](docs/specs/12-repo-connection.md) for the full specification.
 
 ## Design Principles
 
-The system is built on eight validated planning principles:
+The system is built on nine validated planning principles:
 
 1. **Happy Path Is Not a Plan** — all failure modes are designed, not just the success case
 2. **Every State Needs Entry & Exit** — no dead-end states
@@ -135,6 +246,7 @@ The system is built on eight validated planning principles:
 6. **Limits Prevent Runaway** — every loop, retry, and queue is bounded
 7. **Cross-Reference or Contradict** — one spec owns each concept
 8. **No Silent Failures** — every failure escalates to a human with full context
+9. **Stability Over Wasted Work** — prefer clean shutdown over fast shutdown; never kill mid-operation
 
 ## Project Status
 
