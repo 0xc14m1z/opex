@@ -66,7 +66,8 @@ class PipelineStatus(StrEnum):
     COMPLETING = "completing"        # All tasks done, opening PR
     COMPLETED = "completed"          # PR opened
     PARTIALLY_FAILED = "partially_failed"  # Some tasks need human intervention
-    CANCELLED = "cancelled"          # Explicitly cancelled by human
+    CANCELLING = "cancelling"        # Human requested cancel, waiting for containers to exit
+    CANCELLED = "cancelled"          # All containers exited, cancellation finalized
     # NOTE: There is no FAILED state. See spec 01 (P8 — No Silent Failures).
     # PARTIALLY_FAILED can recover via retry or human takeover → COMPLETED,
     # or be explicitly cancelled by the human → CANCELLED.
@@ -601,6 +602,19 @@ class PipelineCancelledPayload(BaseModel):
     tasks_cancelled: int
     branches_preserved: list[str]            # Branches left for salvage
     total_cost: float
+
+
+class PipelineCancelRequestedPayload(BaseModel):
+    """Published by the API server when a human requests pipeline cancellation."""
+    pipeline_id: str
+    reason: str                              # Human-provided cancellation reason
+    requested_by: str                        # "human:{user_id}"
+
+
+class PipelineCleanupRequestedPayload(BaseModel):
+    """Published by the API server when a human requests cleanup of a cancelled pipeline."""
+    pipeline_id: str
+    requested_by: str                        # "human:{user_id}"
 ```
 
 ## PostgreSQL Schema

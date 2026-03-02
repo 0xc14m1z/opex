@@ -369,7 +369,9 @@ The orchestrator's full dispatch table. Every message type from spec 04 is accou
 | `branch_merged`            | `pipeline:{id}:git_ops`       | Mark task `completed`; check `get_ready_tasks()` → spawn Sherlocks for newly unblocked tasks; if all tasks done → emit `all_tasks_complete` |
 | `all_tasks_complete`       | (self-emitted)                | Spawn Richelieu (`open_pr`)                               |
 | `pr_opened`                | `pipeline:{id}:git_ops`       | Mark pipeline `completed`; emit `pipeline_completed`      |
-| `pipeline_failed`          | (self-emitted)                | Mark pipeline `failed`; alert human; preserve state       |
+| `pipeline_partially_failed`| (self-emitted)                | Mark pipeline `partially_failed`; alert human; preserve state |
+| `pipeline_cancel_requested`| `system:pipelines`            | Pipeline → `CANCELLING`; stop dispatching; wait for all containers to exit naturally; finalize to `CANCELLED` (see spec 01, Option 3) |
+| `pipeline_cleanup_requested`| `system:pipelines`           | Spawn Richelieu to close open PRs and delete branches for a cancelled pipeline |
 
 ### Events the Orchestrator Observes (but doesn't act on)
 
@@ -459,20 +461,12 @@ class PipelineCompletedPayload(BaseModel):
     human_review_needed: bool
 ```
 
-### `pipeline_failed`
+### `pipeline_partially_failed`
 
-Published by the orchestrator when the pipeline cannot continue.
+Published by the orchestrator when all runnable work is exhausted and some tasks
+need human intervention. The pipeline can still recover via retry or human takeover.
 
-```python
-class PipelineFailedPayload(BaseModel):
-    pipeline_id: str
-    reason: str
-    failed_task_id: str | None           # None if pipeline-level failure
-    tasks_completed: int
-    tasks_remaining: int
-    total_cost: float
-    recoverable: bool                    # Can human fix and retry?
-```
+Payload: `PipelinePartiallyFailedPayload` (defined in spec 02).
 
 ---
 
@@ -527,13 +521,17 @@ CREATE INDEX idx_containers_status ON active_containers(status);
 
 ```python
 class PipelineStatus(StrEnum):
-    CREATED = "created"                  # Plan received, not yet started
-    DECOMPOSING = "decomposing"          # Julius is running
-    IN_PROGRESS = "in_progress"          # Tasks are being processed
-    COMPLETING = "completing"            # All tasks done, opening PR
-    COMPLETED = "completed"              # PR opened
-    FAILED = "failed"                    # Unrecoverable failure
-    CANCELLED = "cancelled"              # Cancelled by human
+    CREATED = "created"              # Plan received, not yet started
+    DECOMPOSING = "decomposing"      # Julius is running
+    IN_PROGRESS = "in_progress"      # Tasks are being processed
+    COMPLETING = "completing"        # All tasks done, opening PR
+    COMPLETED = "completed"          # PR opened
+    PARTIALLY_FAILED = "partially_failed"  # Some tasks need human intervention
+    CANCELLING = "cancelling"        # Human requested cancel, waiting for containers to exit
+    CANCELLED = "cancelled"          # All containers exited, cancellation finalized
+    # NOTE: There is no FAILED state. See spec 01 (P8 — No Silent Failures).
+    # PARTIALLY_FAILED can recover via retry or human takeover → COMPLETED,
+    # or be explicitly cancelled by the human → CANCELLED.
 ```
 
 ---
@@ -756,7 +754,7 @@ flowchart TD
     C -->|"In DB + stopped"| E["Check exit code\nProcess result if not already processed"]
     C -->|"Not in DB + running"| F["Stop and remove\n(orphan from previous crash)"]
     D & E & F --> G["4. Process pending Redis entries\n(automatic via XREADGROUP with PEL)"]
-    G --> H["5. For PAUSED pipelines:\ncheck interrupted tasks,\nresume from checkpoint"]
+    G --> H["5. For CANCELLING pipelines:\nresume cancellation flow\n(check containers → finalize if all exited)"]
     H --> I["6. Start normal event loop\n+ heartbeat loop"]
 ```
 
@@ -812,7 +810,7 @@ class OrchestratorConfig(BaseSettings):
     # Pipeline error threshold (consecutive errors before pausing)
     pipeline_error_threshold: int = 5
 
-    model_config = SettingsConfigDict(env_prefix="CONTROLLER_")
+    model_config = SettingsConfigDict(env_prefix="ORCHESTRATOR_")
 ```
 
 ---

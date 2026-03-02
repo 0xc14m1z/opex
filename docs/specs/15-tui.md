@@ -64,6 +64,7 @@ teams:
 | View task progress         | `GET /pipelines/:id`, `GET /stream/pipeline/:id` |
 | Create a new pipeline      | `POST /pipelines`                          |
 | Cancel a pipeline          | `DELETE /pipelines/:id`                    |
+| Clean up cancelled pipeline| `POST /pipelines/:id/cleanup`              |
 | Override retry limit       | `PATCH /pipelines/:id/retries`             |
 | Diagnostic chat            | `POST /tasks/:id/chat`, `GET /tasks/:id/chat/:sid` |
 | Add context & retry        | `POST /tasks/:id/retry`                    |
@@ -78,6 +79,8 @@ teams:
 | Edit principles            | `PUT /principles/:id`                      |
 | View learning conversations| `GET /conversations`                       |
 | Tail agent logs            | `GET /stream/logs/:agent`                  |
+| Attention queue            | `GET /attention`, `DELETE /attention/:id`   |
+| Webhook config             | `GET /config/notifications`, `PUT /config/notifications` |
 | System health              | `GET /health`, `GET /status`               |
 
 ---
@@ -87,15 +90,71 @@ teams:
 > **Migrated from**: `docs/specs/03-task-visibility.md` — TUI Screens section
 > (Updated to reflect API server architecture: TUI connects to API server, not Redis directly)
 
-### 1. Pipeline Overview (Default Screen)
+### 1. Dashboard (Default Screen)
 
-The main view showing the current state of all active work. Data is sourced from
-`GET /pipelines` (initial load) and `GET /stream/pipelines` (real-time updates).
+The landing screen providing an at-a-glance view of the entire system. The
+**Attention Queue** is the topmost, most prominent panel — items needing
+human action are always visible the moment the TUI opens. Data is sourced
+from `GET /attention`, `GET /pipelines`, `GET /health`, and
+`GET /stream/pipelines` (real-time updates).
 
 ```
 ┌─ Opex Dashboard ──────────────────────────────────── 14:32:05 ─┐
 │                                                                    │
-│  PIPELINE: feature/add-user-auth ───────────────────────────────── │
+│  ┌─ ⚠ Needs Attention (3) ─────────────────────────────────────┐  │
+│  │                                                               │  │
+│  │  ⚠ HIGH  Task #7 "Add JWT middleware"            12m ago     │  │
+│  │          3 attempts exhausted — needs guidance                │  │
+│  │          Pipeline: feature/add-auth                           │  │
+│  │                                                               │  │
+│  │  ● MED   PR #42 flagged by Katherine             28m ago     │  │
+│  │          Confidence: 0.38 — human review required             │  │
+│  │          Pipeline: feature/add-auth                           │  │
+│  │                                                               │  │
+│  │  ○ LOW   Budget at 82% of daily limit             1h ago     │  │
+│  │          $82.00 / $100.00                                     │  │
+│  │                                                               │  │
+│  │  [Enter] Inspect  [D]ismiss                                  │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│  ┌─ Active Pipelines (2) ───────────────────────────────────────┐  │
+│  │                                                               │  │
+│  │  feature/add-auth    IN_PROGRESS  3/5 tasks   $4.82  ⚠      │  │
+│  │  feature/fix-perf    LEARNING     1/3 tasks   $1.20          │  │
+│  │                                                               │  │
+│  │  Completed today: 1    Cancelled: 0                          │  │
+│  │                                                               │  │
+│  │  [Enter] Open pipeline  [N]ew pipeline                       │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│  ┌─ System ─────────────────────────────────────────────────────┐  │
+│  │  Orchestrator: ● healthy    Redis: ● healthy                 │  │
+│  │  PostgreSQL:   ● healthy    Agents running: 3                │  │
+│  │  Cost today: $6.02 / $100.00                                 │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                    │
+│  [A]ttention  [P]ipelines  [L]ogs  [C]ost  [S]ettings  [Q]uit   │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+The Attention Queue panel on the dashboard is a **summary view** — it shows
+the top items with severity, title, age, and pipeline. Selecting an item
+(Enter) drills into the specific task or pipeline detail. For the full
+attention queue with filters and in-place actions, press `[A]` to open the
+dedicated Attention Queue screen (see below).
+
+When there are zero attention items, the panel collapses to a single line:
+`✓ No items need attention`.
+
+### 2. Pipeline Overview
+
+Drill into a specific pipeline to see its full task graph and agent activity.
+Accessed by selecting a pipeline from the Dashboard's Active Pipelines panel.
+Data is sourced from `GET /pipelines/:id` (initial load) and
+`GET /stream/pipeline/:id` (real-time updates).
+
+```
+┌─ Pipeline: feature/add-user-auth ──────────────── 14:32:05 ─┐
 │                                                                    │
 │  Julius ✓  →  Sherlock ●  →  Leonard ◌ ◌ ◌  →  Katherine ◌       │
 │  5 tasks      task-2       pending (3)        waiting              │
@@ -120,11 +179,11 @@ The main view showing the current state of all active work. Data is sourced from
 │                                                                    │
 │  Cost: $2.34 (soft limit: $25.00)  │  Tokens: 142,830            │
 │                                                                    │
-│  [T]asks  [L]ogs  [C]onsensus  [K]ost  [H]elp  [Q]uit           │
+│  [B]ack  [T]ask detail  [L]ogs  [C]onsensus  [K]ost  [H]elp    │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Task Detail View
+### 3. Task Detail View
 
 Drill into a specific task to see its full lifecycle. Data sourced from
 `GET /pipelines/:id` and `GET /stream/pipeline/:id`.
@@ -157,7 +216,7 @@ Drill into a specific task to see its full lifecycle. Data sourced from
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. Log Stream View
+### 4. Log Stream View
 
 Live tail of structured logs, filterable by agent, level, and task.
 Data sourced from `GET /stream/logs` and `GET /stream/logs/:agent`.
@@ -185,7 +244,7 @@ Data sourced from `GET /stream/logs` and `GET /stream/logs/:agent`.
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4. Consensus History View
+### 5. Consensus History View
 
 See how LLMs debated and reached (or failed to reach) consensus.
 Data sourced from `GET /pipelines/:id` (consensus records).
@@ -216,7 +275,7 @@ Data sourced from `GET /pipelines/:id` (consensus records).
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### 5. Cost Dashboard
+### 6. Cost Dashboard
 
 Token usage and cost breakdown. Data sourced from `GET /pipelines/:id`
 (cost and token fields).
@@ -254,7 +313,7 @@ Token usage and cost breakdown. Data sourced from `GET /pipelines/:id`
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### 6. Multi-Team View
+### 7. Multi-Team View
 
 > **Migrated from**: `docs/specs/01-deployment.md` — Multi-team view mockup
 
@@ -288,26 +347,65 @@ connection string and independent pipeline state.
 
 ---
 
-## Human Escalation Points
+## Attention Queue
 
+> **Replaces**: previous "Human Escalation Points" banner design.
 > **Migrated from**: `docs/specs/03-task-visibility.md` — Human Escalation Points section
 
-When agents need human input, the TUI shows a notification banner:
+The Attention Queue is the TUI's **primary action center** for items that need
+human intervention. It appears in two forms:
+
+1. **Summary panel** on the Dashboard (screen 1) — always visible, top of screen.
+2. **Dedicated screen** (`[A]` from dashboard) — full view with filters, severity
+   grouping, and in-place actions.
+
+### Data source
+
+The API server maintains the attention queue (`GET /attention`). Items are created
+when escalation events arrive on the `system:escalations` Redis Stream. Items
+are auto-resolved when the underlying state changes (task retried, taken over,
+pipeline cancelled). Manual dismiss is available via `DELETE /attention/:id`.
+
+Escalation events arrive in real-time via `GET /stream/pipelines` SSE stream
+(event types: `escalation`, `escalation_resolved`).
+
+### Attention item types
+
+| Type | Severity | Trigger |
+|------|----------|---------|
+| `needs_human` | HIGH | Task enters NEEDS_HUMAN state |
+| `review_flagged` | MEDIUM | Katherine flags low confidence score |
+| `consensus_failed` | MEDIUM | Nelson can't reach agreement |
+| `pipeline_partial_fail` | HIGH | Pipeline enters PARTIALLY_FAILED |
+| `budget_warning` | LOW | Cost exceeds 80% of limit |
+| `budget_critical` | HIGH | Cost exceeds 95% of limit |
+
+### Dedicated Attention Queue screen
 
 ```
-┌─ ⚠ ATTENTION NEEDED ──────────────────────────────────────────────┐
-│                                                                    │
-│  1. Katherine flagged PR #42 for human review (confidence: 0.38)  │
-│  2. Nelson couldn't reach consensus on database schema approach    │
-│  3. Task #7 needs human guidance (3 attempts failed)              │
-│                                                                    │
-│  Press [1] [2] [3] to view details, [D]ismiss                    │
-└────────────────────────────────────────────────────────────────────┘
+┌─ Attention Queue ── 3 open ──── Filter: [severity:all] [pipe:all] ─┐
+│                                                                      │
+│  ⚠ HIGH  Task #7 "Add JWT middleware"                    12m ago    │
+│          Pipeline: feature/add-auth                                  │
+│          3 attempts exhausted — needs guidance                        │
+│          Actions: [I]nvestigate  [T]ake over  [C]ancel pipeline     │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+│  ● MED   PR #42 flagged by Katherine                    28m ago     │
+│          Pipeline: feature/add-auth                                  │
+│          Confidence: 0.38 — human review required                    │
+│          Actions: [V]iew PR  [A]pprove  [R]eject                    │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+│  ○ LOW   Budget at 82% of daily limit                     1h ago    │
+│          $82.00 / $100.00                                            │
+│          Actions: [V]iew cost breakdown  [D]ismiss                   │
+│                                                                      │
+│  [F]ilter  [B]ack to dashboard                                      │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-Escalation events arrive via `GET /stream/pipelines` SSE stream from the API
-server (spec 14). The TUI maintains a notification queue and displays the banner
-when there are unresolved escalations.
+Each attention item is **actionable in-place** — the available actions depend on
+the item type. Selecting an action opens the appropriate view (diagnostic chat,
+PR detail, cost dashboard, etc.) without navigating through intermediate screens.
 
 ### Human Intervention Actions
 
@@ -384,6 +482,39 @@ used in:
 
 Diff rendering uses Textual's built-in rich text capabilities with
 side-by-side or unified diff format, color-coded additions/deletions.
+
+### Cancelled Pipeline Cleanup
+
+When a pipeline is cancelled, PRs and branches are preserved so the human can
+review salvageable work. The TUI shows a cleanup action when ready:
+
+```
+┌─ Pipeline: feature/add-auth ── CANCELLED ────────────────────────┐
+│                                                                    │
+│  Reason: "Deprioritized — switching to payment integration first" │
+│  Cancelled at: 2026-03-01 14:32:05                                │
+│                                                                    │
+│  ┌─ Completed (2) ───────────────────────────────────────────────┐│
+│  │  #1  ✓ Add User model          PR #101 merged                ││
+│  │  #5  ✓ Update API docs         PR #105 merged                ││
+│  └───────────────────────────────────────────────────────────────┘│
+│                                                                    │
+│  ┌─ Cancelled (3) ───────────────────────────────────────────────┐│
+│  │  #2  ✗ Create auth endpoints   PR #102 open (salvageable?)   ││
+│  │  #3  ✗ Add JWT middleware      not started                    ││
+│  │  #4  ✗ Write auth tests        not started                    ││
+│  └───────────────────────────────────────────────────────────────┘│
+│                                                                    │
+│  Branches: feature/add-auth, opex/.../task-2                      │
+│  Cost: $4.82                                                      │
+│                                                                    │
+│  [U] Clean up (close PRs, delete branches)  [B]ack               │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+The "Clean up" action calls `POST /pipelines/:id/cleanup` (spec 14), which
+triggers Richelieu to close open PRs and delete branches. See spec 01,
+Option 3 for the full flow.
 
 ---
 

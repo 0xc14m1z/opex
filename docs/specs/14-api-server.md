@@ -52,6 +52,7 @@ POST   /pipelines                     # Create a new pipeline
 GET    /pipelines                     # List all pipelines
 GET    /pipelines/:id                 # Pipeline detail (status, tasks, cost)
 DELETE /pipelines/:id                 # Cancel a pipeline
+POST   /pipelines/:id/cleanup         # Clean up cancelled pipeline (close PRs, delete branches)
 ```
 
 <!-- TODO: Detailed request/response schemas for pipeline endpoints -->
@@ -147,6 +148,38 @@ POST   /chat                         # Send a message in a learning discussion
 
 <!-- TODO: Detailed request/response schemas for conversation endpoints -->
 
+### Attention Queue
+
+```
+GET    /attention                     # List all unresolved attention items
+DELETE /attention/:id                 # Dismiss an attention item
+```
+
+The attention queue is the API server's aggregation of all items that need
+human action. The TUI Dashboard (spec 15) renders this as its primary panel.
+
+Items are created when escalation events arrive on `system:escalations` Redis
+Stream. Items are auto-resolved when the underlying state changes (task
+retried, taken over, pipeline cancelled). Manual dismiss is also available.
+
+Each attention item has a severity level:
+
+| Type | Severity | Trigger |
+|------|----------|---------|
+| `needs_human` | HIGH | Task enters NEEDS_HUMAN state |
+| `review_flagged` | MEDIUM | Katherine flags low confidence |
+| `consensus_failed` | MEDIUM | Nelson can't reach agreement |
+| `pipeline_partial_fail` | HIGH | Pipeline enters PARTIALLY_FAILED |
+| `budget_warning` | LOW | Cost exceeds 80% of limit |
+| `budget_critical` | HIGH | Cost exceeds 95% of limit |
+
+### Webhook Configuration
+
+```
+GET    /config/notifications          # Get current webhook config
+PUT    /config/notifications          # Update webhook config at runtime
+```
+
 ### System
 
 ```
@@ -189,6 +222,88 @@ data: {"timestamp": "2026-03-05T14:31:05Z", "level": "INFO", "agent": "leonard",
 event: learning_message
 data: {"role": "nelson", "content": "I extracted these candidate principles...", "timestamp": "..."}
 -->
+
+The `GET /stream/pipelines` endpoint also emits escalation events for the
+TUI Attention Queue:
+
+```
+event: escalation
+data: {"id": "esc-001", "type": "needs_human", "severity": "high",
+       "pipeline_id": "pipe-abc123", "pipeline_name": "feature/add-auth",
+       "task_id": "task-7", "task_title": "Add JWT middleware",
+       "reason": "3 attempts exhausted", "timestamp": "2026-03-02T14:32:05Z"}
+
+event: escalation_resolved
+data: {"id": "esc-001", "resolved_by": "retry", "timestamp": "2026-03-02T14:45:00Z"}
+```
+
+---
+
+## Webhook Notifications
+
+The API server supports outbound webhook notifications for escalation events.
+This enables out-of-band alerting (Slack, email relays, PagerDuty, Discord)
+so humans are notified even when the TUI is not open.
+
+### Configuration
+
+Webhook configuration is **deployment-level** (not per-project). It is set
+via environment variables in `.env` and can be updated at runtime via the
+API:
+
+```bash
+# .env
+OPEX_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../xxx
+OPEX_WEBHOOK_EVENTS=needs_human,pipeline_partial_fail,budget_critical
+OPEX_WEBHOOK_HEADERS=X-Custom-Auth:secret
+```
+
+Or via API:
+
+```
+PUT /config/notifications
+{
+  "webhook_url": "https://hooks.slack.com/services/T.../B.../xxx",
+  "events": ["needs_human", "pipeline_partial_fail", "budget_critical"],
+  "headers": {"X-Custom-Auth": "secret"}
+}
+```
+
+If `events` is omitted or empty, all escalation events are sent. The
+available event types match the attention queue severity table above.
+
+### Webhook payload
+
+```json
+{
+  "event": "needs_human",
+  "severity": "high",
+  "pipeline_id": "pipe-abc123",
+  "pipeline_name": "feature/add-auth",
+  "task_id": "task-7",
+  "task_title": "Add JWT middleware",
+  "reason": "3 attempts exhausted",
+  "timestamp": "2026-03-02T14:32:05Z",
+  "attention_id": "esc-001"
+}
+```
+
+The API server sends a `POST` to the configured URL with a JSON body and
+`Content-Type: application/json`. Custom headers from config are included.
+Delivery is fire-and-forget with a 5-second timeout. Failed deliveries are
+logged but not retried (webhooks are best-effort; the TUI Attention Queue
+is the authoritative channel).
+
+### Alternative: Grafana alerting
+
+For teams that prefer ops-native alerting, Grafana (already in the Docker
+Compose stack via spec 06) can be configured to alert on Loki log patterns.
+Escalation events are logged by the orchestrator as structured log entries
+(e.g., `event=needs_human task_id=task-7`), which Grafana can match via
+LogQL alerting rules. Grafana natively supports Slack, email, PagerDuty,
+and OpsGenie as alert destinations. This approach requires no application
+code changes but is documented as an alternative to the built-in webhook
+mechanism.
 
 ---
 
@@ -345,6 +460,7 @@ The API server supports the following TUI features (see spec 15 for TUI details)
 | View task progress         | `GET /pipelines/:id`, `GET /stream/pipeline/:id` |
 | Create a new pipeline      | `POST /pipelines`                          |
 | Cancel a pipeline          | `DELETE /pipelines/:id`                    |
+| Clean up cancelled pipeline| `POST /pipelines/:id/cleanup`              |
 | Override retry limit       | `PATCH /pipelines/:id/retries`             |
 | Diagnostic chat            | `POST /tasks/:id/chat`, `GET /tasks/:id/chat/:sid` |
 | Add context & retry        | `POST /tasks/:id/retry`                    |
@@ -359,6 +475,8 @@ The API server supports the following TUI features (see spec 15 for TUI details)
 | Edit principles            | `PUT /principles/:id`                      |
 | View learning conversations| `GET /conversations`                       |
 | Tail agent logs            | `GET /stream/logs/:agent`                  |
+| Attention queue            | `GET /attention`, `DELETE /attention/:id`   |
+| Webhook config             | `GET /config/notifications`, `PUT /config/notifications` |
 | System health              | `GET /health`, `GET /status`               |
 
 ---

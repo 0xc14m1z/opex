@@ -29,11 +29,12 @@ stateDiagram-v2
     IN_PROGRESS --> PARTIALLY_FAILED
     COMPLETING --> COMPLETED
     PARTIALLY_FAILED --> COMPLETED : after retry
-    PARTIALLY_FAILED --> CANCELLED : human abandons
-    CREATED --> CANCELLED : human cancels
-    DECOMPOSING --> CANCELLED : human cancels
-    IN_PROGRESS --> CANCELLED : human cancels
-    COMPLETING --> CANCELLED : human cancels
+    PARTIALLY_FAILED --> CANCELLING : human abandons
+    CREATED --> CANCELLING : human cancels
+    DECOMPOSING --> CANCELLING : human cancels
+    IN_PROGRESS --> CANCELLING : human cancels
+    COMPLETING --> CANCELLING : human cancels
+    CANCELLING --> CANCELLED : all containers exited
 ```
 
 | Status | Description |
@@ -44,7 +45,8 @@ stateDiagram-v2
 | `COMPLETING` | All tasks done, opening PR |
 | `COMPLETED` | PR opened |
 | `PARTIALLY_FAILED` | Some tasks succeeded, some need human intervention. Pipeline can recover via retry or human takeover. |
-| `CANCELLED` | Explicitly cancelled by human |
+| `CANCELLING` | Human requested cancellation. Orchestrator has stopped dispatching; waiting for running containers to finish and exit naturally. |
+| `CANCELLED` | All containers exited. Cancellation finalized. PRs left open for human review; cleanup available via TUI. |
 
 > **Design principle (P8 — No Silent Failures):** There is no automatic
 > `FAILED` terminal state for pipelines. The system never gives up
@@ -391,6 +393,22 @@ TTL (default: 48 hours).
 When a task reaches `NEEDS_HUMAN`, the human has three options: investigate
 and retry, take over manually, or cancel the entire pipeline.
 
+### Escalation notification
+
+When any task enters `NEEDS_HUMAN`, the orchestrator publishes an escalation
+event to the `system:escalations` Redis Stream. The API server consumes this
+stream and:
+
+1. **Pushes an SSE event** to all connected TUI clients (spec 15 — Attention
+   Queue).
+2. **Fires an outbound webhook** (if configured) so the human receives an
+   out-of-band notification (e.g., Slack, email relay, PagerDuty). See
+   spec 14 — Webhook Notifications for the payload format and configuration.
+
+This ensures **P8 (No Silent Failures)** is maintained even when the TUI is
+not actively open — the system never silently waits for a human who isn't
+watching.
+
 ### Option 1: Investigate and retry (diagnostic chat)
 
 A two-phase process mediated by the TUI and API server.
@@ -488,15 +506,92 @@ performing a full review cycle. See spec 21 for Katherine's modes.
 
 The human decides the whole feature isn't worth pursuing.
 
+**Trigger**: TUI → `DELETE /pipelines/:id` (spec 14) → API server publishes
+`pipeline_cancel_requested` to `system:pipelines` Redis stream.
+
+**Design principle (P9 — Stability Over Wasted Work):** Cancellation is
+cooperative. The orchestrator stops dispatching new work. Running agents
+finish their current atomic operation, publish their normal completion event,
+and exit. The orchestrator ACKs those events without acting on them. No
+SIGTERM, no timeout, no forced kill. Agents don't know they've been cancelled.
+
+#### Cancellation flow (orchestrator-only)
+
 ```mermaid
-flowchart TD
-    A[Pipeline] --> B[CANCELLED]
-    B --> C[All running tasks --> CANCELLED]
-    B --> D[All pending tasks --> CANCELLED]
-    C & D --> E[Cancellation record stored]
-    E --> F["- reason (human-provided text via TUI)\n- which tasks completed vs. in-progress\n- what branches/PRs exist\n- timestamp"]
-    F --> G["Branches/PRs NOT auto-deleted\n(human may want to salvage)\nCleanup via TUI command or TTL auto-cleanup"]
+sequenceDiagram
+    participant Human
+    participant TUI
+    participant API as API Server
+    participant Redis
+    participant Orch as Orchestrator
+    participant PG as PostgreSQL
+    participant Agents as Running Agents
+
+    Human->>TUI: Cancel pipeline (with reason)
+    TUI->>API: DELETE /pipelines/:id
+    API->>Redis: pipeline_cancel_requested
+
+    Orch->>PG: Pipeline → CANCELLING
+    Note over Orch: Stop dispatching new work.<br/>ACK incoming events but don't act on them.
+
+    Agents->>Agents: Finish current atomic operation
+    Agents->>Redis: Normal completion events
+    Orch-->>Redis: ACK (no action)
+    Agents--xAgents: Exit naturally
+
+    Note over Orch: Wait for all containers to exit.<br/>No timeout. No forced shutdown.
+
+    Orch->>PG: Tasks already COMPLETED → leave as-is
+    Orch->>PG: All other tasks → CANCELLED
+    Orch->>PG: Store PipelineCancelledPayload
+    Orch->>PG: Pipeline → CANCELLED
+    Orch->>Redis: pipeline_cancelled
+
+    TUI->>Human: Pipeline cancelled (summary)
 ```
+
+#### What "atomic operation" means
+
+The orchestrator doesn't force-stop any agent. Each agent finishes whatever
+indivisible operation it's in the middle of:
+
+| Agent | Atomic operation | Why it must finish |
+|-------|------------------|--------------------|
+| Richelieu | One git command (push, merge, rebase) | Interrupting mid-push corrupts branch state |
+| Leonard | One file write or shell command | Interrupting mid-write corrupts worktree |
+| Nelson | One LLM provider call | Interrupting loses partial consensus data |
+| Katherine | One review analysis call | Consistency |
+| Sherlock | One enrichment step | Consistency |
+| Julius | One decomposition call | Consistency |
+
+After finishing, agents publish their normal completion event and exit.
+The orchestrator ACKs these events without acting on them — no new agents
+spawned, no state transitions except container tracking.
+
+#### Preserved artifacts
+
+- **Branches preserved**: All task branches and the feature branch stay on GitHub.
+- **PRs left open**: Task PRs remain open for human review. The human may want
+  to inspect salvageable work before cleaning up.
+- **Cancellation record**: Stored in PostgreSQL with reason (human-provided),
+  completed task count, cancelled task count, list of preserved branches,
+  and total cost.
+
+#### PR and branch cleanup (separate human action)
+
+After reviewing preserved work, the human triggers cleanup via the TUI:
+
+1. TUI shows cancelled pipeline with list of open PRs and branches.
+2. Human selects "Clean up" action.
+3. `POST /pipelines/:id/cleanup` (spec 14) → API publishes
+   `pipeline_cleanup_requested` to `system:pipelines`.
+4. Orchestrator spawns Richelieu.
+5. Richelieu closes all open task PRs with comment: "Pipeline cancelled: {reason}".
+6. Richelieu deletes task branches and feature branch.
+7. Cleanup record stored in PostgreSQL.
+
+This is a separate, explicit human action — never automatic. The human
+has full control over when artifacts are removed.
 
 ---
 

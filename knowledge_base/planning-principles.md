@@ -12,6 +12,7 @@
 > - P5 (Name the Mechanism) → catches **vague design**
 > - P6 (Limits) → catches **runaway behavior**
 > - P7 (Cross-Reference) → catches **consistency drift**
+> - P9 (Stability Over Wasted Work) → catches **unsafe shutdown/cleanup**
 
 ---
 
@@ -245,7 +246,7 @@ often points directly to the solution.
 | Issue | Principle violated |
 |-------|--------------------|
 | 1. Failure scenarios absent | P1 (Happy Path), P2 (Entry/Exit), P8 (No Silent Failures) |
-| 2. Cancellation undefined | P2 (Entry/Exit) |
+| 2. Cancellation undefined | P2 (Entry/Exit), P9 (Stability Over Wasted Work) |
 | 3. NEEDS_HUMAN incomplete | P2 (Entry/Exit), P8 (No Silent Failures) |
 | 4. Post-merge rebase trigger missing | P4 (Parallel = Conflicting) |
 | 5. Parallel pipelines undefined | P4 (Parallel = Conflicting) |
@@ -259,3 +260,40 @@ often points directly to the solution.
 | 13. Worktree path inconsistency | P7 (Cross-Reference) |
 | 14. Branch naming origin | P5 (Name the Mechanism) |
 | 15. Parallelism limits scope | P3 (Boundaries), P6 (Limits) |
+
+---
+
+## Principle 9: Stability Over Wasted Work
+
+**When choosing between stopping quickly and stopping cleanly, always choose
+clean. Wasting work is cheap; corrupted state is expensive.**
+
+A cancelled pipeline should not leave behind half-pushed branches, partially
+written files, or inconsistent database state. It's better to let a Leonard
+finish writing a file that nobody will review, or let a Richelieu complete a
+push that nobody will merge from, than to interrupt mid-operation and risk
+corruption. The wasted compute is bounded (each agent finishes one atomic
+step), while the cost of recovering from corrupted state is unbounded.
+
+This principle applies beyond cancellation — anywhere the system faces a
+choice between "fast and risky" vs "slow and safe," default to safe.
+
+### Validation checklist
+- [ ] Can any operation be interrupted in a way that leaves shared state
+      inconsistent?
+- [ ] When the system stops (cancel, shutdown, crash recovery), does it
+      wait for in-flight operations to complete?
+- [ ] Are write operations (git, database, file system) atomic or guarded
+      by cleanup on failure?
+- [ ] Is the overhead of "wasted work" bounded and predictable?
+
+### Anti-pattern
+Force-killing a container that's mid-`git push` to save 30 seconds of
+compute. The branch is now in an unknown state on the remote, and the
+recovery cost dwarfs the savings.
+
+### Design consequence
+Pipeline cancellation uses cooperative shutdown: the orchestrator stops
+dispatching new work, running agents finish their current atomic operation
+and exit naturally. No SIGTERM, no timeout, no SIGKILL. The orchestrator
+waits as long as needed for all containers to exit cleanly.
