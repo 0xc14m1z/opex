@@ -360,7 +360,7 @@ The orchestrator's full dispatch table. Every message type from spec 04 is accou
 | `pipeline_created`         | `system:pipelines`            | Create pipeline record; spawn Richelieu (`create_feature_branch`); then spawn Julius |
 | `decomposition_complete`   | `pipeline:{id}:tasks`         | Store dependency graph; emit `batch_dispatched`; spawn Sherlocks for ready tasks |
 | `task_enriched`            | `pipeline:{id}:enriched`      | Update task status → `ready`; spawn Richelieu (`create_worktree`); then spawn Leonard |
-| `implementation_complete`  | `pipeline:{id}:reviews`       | Spawn Katherine for the completed task                    |
+| `implementation_complete`  | `pipeline:{id}:reviews`       | **Rebase gate**: check if feature branch advanced since task branched. If yes → spawn Richelieu (`rebase_branch`); on success → spawn Katherine. If no → spawn Katherine directly. See spec 01 (Branch Alignment). |
 | `review_result:approved`   | `pipeline:{id}:reviews`       | Spawn Richelieu (`merge_branch`)                          |
 | `review_result:changes_requested` | `pipeline:{id}:reviews` | Spawn Leonard again (rework) with feedback attached       |
 | `review_result:escalated`  | `pipeline:{id}:reviews`       | Mark task `needs_human`; emit status event                |
@@ -538,7 +538,8 @@ class PipelineStatus(StrEnum):
 
 ## Complete Event Flow: End-to-End Pipeline
 
-A 20-step walkthrough of a typical pipeline from plan submission to PR.
+A 21-step walkthrough of a typical pipeline from plan submission to PR.
+This is a mirror of the canonical walkthrough in spec 01 (Workflow).
 
 ```mermaid
 sequenceDiagram
@@ -589,7 +590,16 @@ sequenceDiagram
     Leo->>Redis: implementation_complete
     Leo--xLeo: exits
 
-    Note over Human, Kat: 10-12. Review
+    Note over Human, Kat: 10. Branch alignment (rebase gate)
+    Orch->>Orch: Feature branch advanced since task branched?
+    opt rebase needed
+        Orch->>Rich: Spawn (rebase task branch onto feature)
+        Rich->>Redis: git_response (rebase result)
+        Rich--xRich: exits
+        Note right of Rich: Clean/trivial → continue to step 11<br/>Semantic conflict → Leonard resolves, retry gate<br/>Unresolvable → task NEEDS_HUMAN
+    end
+
+    Note over Human, Kat: 11-13. Review
     Orch->>PG: Task status -> IN_REVIEW
     Orch->>Kat: Spawn (TASK_ID)
     Kat->>Redis: consensus_request
@@ -603,21 +613,21 @@ sequenceDiagram
         Orch->>Redis: git_request:merge_branch
     else changes_requested
         Orch->>PG: Task status -> REWORK
-        Note right of Orch: Respawn Leonard (go to step 9)
+        Note right of Orch: Respawn Leonard (go to step 9)<br/>Rebase gate (step 10) runs again after Leonard
     else escalated
         Orch->>PG: Task status -> NEEDS_HUMAN
         Orch->>Redis: escalation to human_input
     end
 
-    Note over Human, Kat: 13-15. Merge & dependency dispatch
+    Note over Human, Kat: 14-16. Merge & dependency dispatch
     Orch->>Rich: Spawn (merge task -> feature branch)
     Rich->>Redis: git_response (merge result)
     Rich--xRich: exits
     Orch->>PG: Task status -> COMPLETED
     Orch->>Orch: Evaluate get_ready_tasks()
-    Note right of Orch: More ready -> spawn Sherlocks (step 6)<br/>All complete -> continue to step 16
+    Note right of Orch: More ready -> spawn Sherlocks (step 6)<br/>All complete -> continue to step 17
 
-    Note over Human, Kat: 16-19. Pipeline completion
+    Note over Human, Kat: 17-20. Pipeline completion
     Orch->>Redis: all_tasks_complete
     Orch->>PG: Status -> COMPLETING
     Orch->>Rich: Spawn (open PR: feature -> target)
@@ -626,7 +636,7 @@ sequenceDiagram
     Orch->>PG: Status -> COMPLETED
     Orch->>Redis: pipeline_completed
 
-    Note over Human, Kat: 20. Human review
+    Note over Human, Kat: 21. Human review
     TUI->>Human: Pipeline summary with link to PR
 ```
 
@@ -665,13 +675,19 @@ flowchart TD
 > retry/escalation logic as Julius, Sherlock, Leonard, and Katherine. Pending
 > requests queue up in Redis (durable) while the orchestrator respawns.
 
-### Scenario 4: Merge conflict on branch_merged
+### Scenario 4: Merge conflict (during rebase gate or merge)
+
+Conflicts are most commonly surfaced at the **rebase gate** (step 10), before Katherine
+reviews. They can also surface at the merge step (step 14) as a safety net.
 
 ```mermaid
 flowchart TD
-    A["Richelieu reports: git_response\nsuccess=false, conflicts=[...]"] --> B{Is conflict auto-resolvable?}
-    B -->|YES| C[Richelieu retries with auto-resolve]
-    B -->|NO| D["Mark task as needs_human\nPreserve branches for manual resolution\nEmit status event with conflicting files"]
+    A["Richelieu reports: git_response\nsuccess=false, conflicts=[...]"] --> B{Conflict type?}
+    B -->|"Trivial\n(imports, whitespace,\nnon-overlapping)"| C[Richelieu resolves mechanically\nforce-push]
+    B -->|"Semantic\n(same logic modified)"| D[Orchestrator spawns Leonard\nwith conflict context]
+    D --> E{Leonard resolves?}
+    E -->|YES| F[Leonard commits resolution\nRichelieu force-pushes\nRetry rebase gate]
+    E -->|NO| G["Mark task needs_human\nPreserve branches\nEmit status event with conflicting files"]
 ```
 
 ### Scenario 5: Budget exceeded during pipeline
@@ -838,7 +854,7 @@ orchestrator via the Launcher.
 | `julius`     | `pipeline_created` event               | 1 per pipeline           | Publishes `decomposition_complete`  |
 | `sherlock`   | Task becomes `ready` (per task)        | Up to max_parallel       | Publishes `task_enriched`           |
 | `leonard`    | Task is enriched + worktree ready      | Up to max_parallel       | Publishes `implementation_complete` |
-| `katherine`  | Implementation complete (per task)     | Up to max_parallel       | Publishes `review_result`           |
+| `katherine`  | After rebase gate passes (per task)    | Up to max_parallel       | Publishes `review_result`           |
 | `nelson`     | `consensus_request` on stream          | Up to max_parallel       | Publishes `consensus_response`      |
 | `richelieu`  | `git_request` on stream                | 1 per branch (serialized)| Publishes `git_response`            |
 
@@ -863,7 +879,7 @@ orchestrator via the Launcher.
 
 | Scenario                        | What to verify                                          |
 |---------------------------------|---------------------------------------------------------|
-| Happy path (3 independent tasks)| All 20 steps complete; pipeline status transitions are correct |
+| Happy path (3 independent tasks)| All 21 steps complete; pipeline status transitions are correct |
 | Task with dependencies          | Dependent tasks launch only after blockers complete     |
 | Agent crash + retry             | Watchdog detects crash; container relaunched; resumes from checkpoint |
 | Max retries exceeded            | Task marked `needs_human`; dependents blocked; pipeline continues for independent tasks |

@@ -161,17 +161,18 @@ the other to become outdated or have conflicts.
 
 ```mermaid
 flowchart TD
-    A[Task-1 PR merges into feature/add-auth] --> B[Orchestrator detects task-2 PR is outdated]
-    B --> C[Spawns Richelieu to rebase task-2 onto feature/add-auth]
-    C --> D{Rebase result}
-    D -->|Clean rebase| E[Force-push\nPR auto-updates on GitHub]
-    D -->|Trivial conflicts\nimports, whitespace| F[Richelieu resolves mechanically]
-    F --> G[Force-push]
-    D -->|Semantic conflicts| H[Richelieu reports conflict details\nto orchestrator]
-    H --> I[Orchestrator spawns Leonard\nwith both sides of the conflict]
-    I --> J{Leonard resolves}
-    J -->|Succeeds| K[Leonard commits resolution\nRichelieu force-pushes]
-    J -->|Fails| L[Mark task needs_human\nPreserve branches\nEmit status event with conflicting files]
+    A[Task-1 PR merges into feature/add-auth] --> B[Feature branch advances]
+    B --> C[Task-2 Leonard finishes → rebase gate triggers]
+    C --> D[Orchestrator spawns Richelieu to rebase task-2]
+    D --> E{Rebase result}
+    E -->|Clean rebase| F[Force-push\nPR auto-updates on GitHub]
+    E -->|Trivial conflicts\nimports, whitespace| G[Richelieu resolves mechanically]
+    G --> H[Force-push]
+    E -->|Semantic conflicts| I[Richelieu reports conflict details\nto orchestrator]
+    I --> J[Orchestrator spawns Leonard\nwith both sides of the conflict]
+    J --> K{Leonard resolves}
+    K -->|Succeeds| L[Leonard commits resolution\nRichelieu force-pushes\nRetry rebase gate]
+    K -->|Fails| M[Mark task needs_human\nPreserve branches\nEmit status event with conflicting files]
 ```
 
 Richelieu handles trivial conflicts (non-overlapping hunks, imports, whitespace) mechanically.
@@ -180,6 +181,38 @@ Leonard with the conflict context (both diffs, both tasks' execution plans). Leo
 LLM and codebase understanding to reason about the correct resolution.
 
 Katherine re-reviews if the rebase changed code (not just a clean fast-forward).
+
+### Integration with the pipeline walkthrough: Rebase Gate
+
+The conflict resolution above is triggered by the **rebase gate** — a mandatory check
+that runs after every Leonard completion, before Katherine starts. See the walkthrough
+(step 10) for the exact sequencing.
+
+**Design rationale (deferred, not eager):** When a sibling task merges into the feature
+branch, the orchestrator does NOT immediately rebase all in-flight sibling branches.
+Instead, it defers the rebase until each sibling reaches a safe point — specifically,
+after Leonard finishes and before Katherine starts. This is a form of lazy evaluation
+that avoids interrupting active agents (P9 — Stability Over Wasted Work).
+
+**Why deferred rebasing is safe at every task state:**
+
+| Sibling state when merge happens | What happens | Why it's safe |
+|---|---|---|
+| PENDING / ENRICHING | Nothing | Will fork from updated feature branch HEAD when task starts |
+| READY (worktree exists, Leonard not spawned) | Nothing now | Rebase gate catches it after Leonard finishes |
+| IMPLEMENTING (Leonard active) | Nothing — never interrupt | Rebase gate catches it after Leonard exits |
+| IN_REVIEW (Katherine active) | Let Katherine finish | If approved → merge step handles conflicts (defense in depth). If changes requested → REWORK → Leonard → rebase gate catches it |
+| REWORK | Nothing now | Leonard re-implements → rebase gate catches it before next Katherine review |
+| MERGING | Richelieu's `merge_branch` already handles outdated base | Safety net |
+
+**Defense in depth:** Two layers protect against outdated merges:
+1. **Primary** — Rebase gate (step 10): Catches the common case.
+2. **Safety net** — `merge_branch` operation (step 14): Catches the edge case where
+   another sibling merges between Katherine's approval and Richelieu's merge.
+
+**REWORK cycle coverage:** The rebase gate runs after every Leonard → Katherine
+transition, including rework cycles. No special logic needed — siblings that merged
+during a review cycle are automatically caught on the next pass.
 
 ---
 
@@ -615,7 +648,7 @@ is stored in the pipeline record in PostgreSQL.
 
 ## Complete Event Flow: End-to-End Pipeline
 
-A 20-step walkthrough of a typical pipeline from plan submission to PR.
+A 21-step walkthrough of a typical pipeline from plan submission to PR.
 
 ```mermaid
 sequenceDiagram
@@ -666,7 +699,16 @@ sequenceDiagram
     Leo->>Redis: implementation_complete
     Leo--xLeo: exits
 
-    Note over Human, Kat: 10-12. Review
+    Note over Human, Kat: 10. Branch alignment (rebase gate)
+    Orch->>Orch: Feature branch advanced since task branched?
+    opt rebase needed
+        Orch->>Rich: Spawn (rebase task branch onto feature)
+        Rich->>Redis: git_response (rebase result)
+        Rich--xRich: exits
+        Note right of Rich: Clean/trivial → continue to step 11<br/>Semantic conflict → Leonard resolves, retry gate<br/>Unresolvable → task NEEDS_HUMAN
+    end
+
+    Note over Human, Kat: 11-13. Review
     Orch->>PG: Task status -> IN_REVIEW
     Orch->>Kat: Spawn (TASK_ID)
     Kat->>Redis: consensus_request
@@ -680,21 +722,21 @@ sequenceDiagram
         Orch->>Redis: git_request:merge_branch
     else changes_requested
         Orch->>PG: Task status -> REWORK
-        Note right of Orch: Respawn Leonard (go to step 9)
+        Note right of Orch: Respawn Leonard (go to step 9)<br/>Rebase gate (step 10) runs again after Leonard
     else escalated
         Orch->>PG: Task status -> NEEDS_HUMAN
         Orch->>Redis: escalation to human_input
     end
 
-    Note over Human, Kat: 13-15. Merge & dependency dispatch
+    Note over Human, Kat: 14-16. Merge & dependency dispatch
     Orch->>Rich: Spawn (merge task -> feature branch)
     Rich->>Redis: git_response (merge result)
     Rich--xRich: exits
     Orch->>PG: Task status -> COMPLETED
     Orch->>Orch: Evaluate get_ready_tasks()
-    Note right of Orch: More ready -> spawn Sherlocks (step 6)<br/>All complete -> continue to step 16
+    Note right of Orch: More ready -> spawn Sherlocks (step 6)<br/>All complete -> continue to step 17
 
-    Note over Human, Kat: 16-19. Pipeline completion
+    Note over Human, Kat: 17-20. Pipeline completion
     Orch->>Redis: all_tasks_complete
     Orch->>PG: Status -> COMPLETING
     Orch->>Rich: Spawn (open PR: feature -> target)
@@ -703,6 +745,6 @@ sequenceDiagram
     Orch->>PG: Status -> COMPLETED
     Orch->>Redis: pipeline_completed
 
-    Note over Human, Kat: 20. Human review
+    Note over Human, Kat: 21. Human review
     TUI->>Human: Pipeline summary with link to PR
 ```

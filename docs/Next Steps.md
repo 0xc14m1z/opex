@@ -3,7 +3,7 @@
 > **Purpose**: This file tracks where we left off and what to do next. Update it
 > at the end of every session so the next session can pick up seamlessly.
 >
-> **Last updated**: 2026-03-02 (session 5, in progress)
+> **Last updated**: 2026-03-02 (session 6, in progress)
 
 ---
 
@@ -82,22 +82,40 @@
     `GET /config/notifications`, `PUT /config/notifications`.
   - SSE events: `escalation`, `escalation_resolved`.
   - Updated specs: 01, 14, 15.
+- **Workflow Issue 4 — Post-merge conflict resolution trigger**: Fully resolved. Decisions:
+  - **Rebase gate** pattern: mandatory rebase check between Leonard finishing and
+    Katherine starting (step 10 in the walkthrough). The orchestrator checks if the
+    feature branch has advanced since the task branched from it.
+  - **Deferred, not eager** (P9 — Stability Over Wasted Work): sibling tasks are
+    never interrupted for rebasing. Rebase deferred until each sibling's Leonard
+    exits — the last safe moment before review.
+  - All task states covered: PENDING/ENRICHING (will fork from updated HEAD),
+    IMPLEMENTING (gate catches after Leonard), IN_REVIEW (let Katherine finish;
+    merge step as safety net), REWORK (gate runs again on next Leonard pass).
+  - **Defense in depth**: primary = rebase gate (step 10), safety net = merge step
+    (step 14). Two layers, same Richelieu `rebase_branch` operation.
+  - **Semantic conflict during rebase**: orchestrator spawns Leonard to resolve,
+    then retries the rebase gate (loop until clean or NEEDS_HUMAN).
+  - **REWORK cycle coverage**: gate runs after every Leonard → Katherine transition,
+    including rework. No special logic needed.
+  - **No new task state**: rebase is part of the IMPLEMENTING → IN_REVIEW transition,
+    like worktree creation is part of ENRICHING → READY.
+  - Walkthrough expanded from 20 to 21 steps. Step numbers renumbered: review (11-13),
+    merge & dispatch (14-16), completion (17-20), human review (21).
+  - Fixed pre-existing inconsistency in spec 18: conflict resolution now shows Leonard
+    resolving semantic conflicts (was "mark task needs_human").
+  - Updated specs: 01, 13, 18.
 
 ---
 
 ## Where We Left Off
 
-**Continuing workflow spec (01) deep-dive.** Issues 1-3 are resolved. 12 issues
+**Continuing workflow spec (01) deep-dive.** Issues 1-4 are resolved. 11 issues
 remain across three categories.
 
 ### Workflow Spec Issues — Ready for Discussion
 
-#### Category 1: Missing Flows (2 remaining)
-
-**Issue 4 — Post-merge conflict resolution trigger is missing.**
-Between steps 14 and 15, after a task PR merges, the spec describes dependency
-dispatch but doesn't mention rebasing sibling PRs. The conflict resolution section
-exists but isn't integrated into the 20-step walkthrough.
+#### Category 1: Missing Flows (1 remaining)
 
 **Issue 5 — Parallel pipelines interaction is undefined.**
 Branching model shows Feature A and Feature B in parallel, but: do they share
@@ -153,7 +171,7 @@ Are `max_parallel_leonards: 3` etc. per-pipeline or global across all pipelines?
 | Spec | Status | Notes |
 |------|--------|-------|
 | 00 Overview | **Reviewed** | Done. Updated with orchestrator rename, new project structure, opex.* namespace, revised phases. |
-| 01 Workflow | **In review** | 3/15 issues resolved (Issues 1-3). 12 remaining. |
+| 01 Workflow | **In review** | 4/15 issues resolved (Issues 1-4). 11 remaining. |
 | 02 Data Models | **Updated** | New: TaskStatus states, PipelineStatus states, RetryConfig, task_attempts, task_context_entries, diagnostic_chat tables. Needs full review after spec 01 completes. |
 | 03 Learning & Principles | Needs review | Verify Extract→Replay→Verify loop is fully specified. |
 | 04 Communication | Needs review | Check message types match orchestrator routing table. |
@@ -165,12 +183,12 @@ Are `max_parallel_leonards: 3` etc. per-pipeline or global across all pipelines?
 | 10 Testing | Needs review | VCR, testcontainers. |
 | 11 Dev Standards | Needs review | ruff, mypy, coverage. |
 | 12 Repo Connection | Needs review | GitHub auth, .opex.yaml full schema. |
-| 13 Orchestrator | **Updated** | Consistency fixes (FAILED→PARTIALLY_FAILED, CONTROLLER_→ORCHESTRATOR_). Added CANCELLING state, cancellation + cleanup routing. Updated startup reconciliation. Needs full review. |
+| 13 Orchestrator | **Updated** | Consistency fixes (FAILED→PARTIALLY_FAILED, CONTROLLER_→ORCHESTRATOR_). Added CANCELLING state, cancellation + cleanup routing. Updated startup reconciliation. Rebase gate in routing table + walkthrough (Issue 4). Needs full review. |
 | 14 API Server | **Updated** | Added human intervention endpoints, cleanup endpoint, attention queue endpoints, webhook notifications (config + payload + Grafana alternative), escalation SSE events, updated capabilities table. Still has TODOs for schemas/error format. |
 | 15 TUI | **Updated** | Dashboard as default screen (replaces Pipeline Overview). Attention Queue as dedicated screen with severity levels and in-place actions. Diagnostic chat mockups, human intervention actions, diff view, cancelled pipeline cleanup mockup. Still has TODOs for keybindings/principle browser. |
 | 16 Nelson | Mostly complete | Full consensus algorithm. Needs prompt/tool review. |
 | 17 Julius | **Has TODOs** | System prompt, PydanticAI tools, decomposition examples. |
-| 18 Richelieu | Mostly complete | Git operations well-defined. Needs prompt/tool review. |
+| 18 Richelieu | **Updated** | Git operations well-defined. Conflict resolution updated with rebase gate trigger + Leonard semantic resolution (Issue 4). Needs prompt/tool review. |
 | 19 Sherlock | **Has TODOs** | System prompt, PydanticAI tools, enrichment examples. |
 | 20 Leonard | **Has TODOs** | System prompt, PydanticAI tools, implementation examples. |
 | 21 Katherine | **Has TODOs** | System prompt, PydanticAI tools, review criteria detail. Add `verify_prerequisites` mode. |

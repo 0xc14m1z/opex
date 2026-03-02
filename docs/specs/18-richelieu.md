@@ -113,7 +113,12 @@ Richelieu implements each operation.
 
 ### Operation: `rebase_branch`
 
-Triggered when a task PR merges and other in-progress task branches need updating.
+**Primary trigger**: The **rebase gate** (spec 01, step 10). After Leonard finishes
+implementing, the orchestrator checks if the feature branch has advanced since the task
+branched from it. If yes, the orchestrator spawns Richelieu with `rebase_branch`.
+
+**Secondary trigger**: Can also be invoked during the `merge_branch` operation (step 14)
+if the task branch is behind the feature branch at merge time (defense in depth).
 
 1. Fetch the updated feature branch.
 2. Rebase the target task branch onto the updated feature branch.
@@ -185,25 +190,25 @@ All task PRs merged -> PR #107: feature/fix-perf -> main
 When parallel task PRs target the same feature branch, merging one may cause
 the other to become outdated or have conflicts.
 
-```
-Task-1 PR merges into feature/add-auth
-    |
-    v
-Orchestrator detects task-2 PR is outdated
-    |
-    v
-Spawns Richelieu to rebase task-2 onto feature/add-auth
-    |
-    +-- Rebase succeeds -> force-push (task branch is AI-owned, safe)
-    |                       PR auto-updates on GitHub
-    |
-    +-- Rebase conflicts -> Richelieu attempts auto-resolution
-                           |
-                           +-- Auto-resolve succeeds -> force-push
-                           |
-                           +-- Auto-resolve fails -> mark task "needs_human"
-                                                      Preserve branches
-                                                      Emit status event with conflicting files
+The primary trigger for rebasing is the **rebase gate** (spec 01, step 10 of the
+walkthrough): after Leonard finishes implementing and before Katherine starts
+reviewing, the orchestrator checks if the feature branch has advanced. If it has,
+Richelieu is spawned to rebase the task branch.
+
+```mermaid
+flowchart TD
+    A[Task-1 PR merges into feature/add-auth] --> B[Orchestrator defers rebase<br/>until sibling reaches safe state]
+    B --> C[Sibling Leonard finishes → rebase gate]
+    C --> D[Spawns Richelieu to rebase task-2 onto feature/add-auth]
+    D --> E{Rebase result}
+    E -->|Clean rebase| F[Force-push<br/>PR auto-updates on GitHub]
+    E -->|Trivial conflicts<br/>imports, whitespace| G[Richelieu resolves mechanically]
+    G --> H[Force-push]
+    E -->|Semantic conflicts| I[Richelieu reports conflict details<br/>to orchestrator]
+    I --> J[Orchestrator spawns Leonard<br/>with both sides of the conflict]
+    J --> K{Leonard resolves?}
+    K -->|Succeeds| L[Leonard commits resolution<br/>Richelieu force-pushes<br/>Retry rebase gate]
+    K -->|Fails| M[Mark task needs_human<br/>Preserve branches<br/>Emit status event with conflicting files]
 ```
 
 Katherine re-reviews if the rebase changed code (not just a clean fast-forward).
