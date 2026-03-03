@@ -63,13 +63,15 @@ class PipelineStatus(StrEnum):
     CREATED = "created"              # Plan received, not yet started
     DECOMPOSING = "decomposing"      # Julius is running
     IN_PROGRESS = "in_progress"      # Tasks are being processed
-    COMPLETING = "completing"        # All tasks done, opening PR
-    COMPLETED = "completed"          # PR opened
+    COMPLETING = "completing"        # All tasks done, opening feature PR
+    MONITORING = "monitoring"        # Feature PR open; system actively maintains branch
+                                     # (rebases, CI fixes, Katherine re-reviews)
+    MERGED = "merged"                # Human merged the feature PR. Pipeline truly done.
     PARTIALLY_FAILED = "partially_failed"  # Some tasks need human intervention
     CANCELLING = "cancelling"        # Human requested cancel, waiting for containers to exit
     CANCELLED = "cancelled"          # All containers exited, cancellation finalized
     # NOTE: There is no FAILED state. See spec 01 (P8 — No Silent Failures).
-    # PARTIALLY_FAILED can recover via retry or human takeover → COMPLETED,
+    # PARTIALLY_FAILED can recover via retry or human takeover → MONITORING,
     # or be explicitly cancelled by the human → CANCELLED.
 
 class Priority(StrEnum):
@@ -575,8 +577,10 @@ class AllTasksCompletePayload(BaseModel):
     elapsed_seconds: float
 
 
-class PipelineCompletedPayload(BaseModel):
-    """Published by the orchestrator after the PR is opened successfully."""
+class PipelineMonitoringPayload(BaseModel):
+    """Published by the orchestrator when the feature PR is opened and the
+    pipeline enters MONITORING state. The system will now actively maintain
+    the feature branch (rebases, CI fixes) until the human merges the PR."""
     pipeline_id: str
     pr_url: str
     pr_number: int
@@ -584,6 +588,18 @@ class PipelineCompletedPayload(BaseModel):
     total_cost: float
     elapsed_seconds: float
     human_review_needed: bool
+
+
+class PipelineMergedPayload(BaseModel):
+    """Published by the orchestrator when it detects the human has merged
+    the feature PR. This is the true terminal state for a successful pipeline."""
+    pipeline_id: str
+    pr_url: str
+    pr_number: int
+    merged_at: datetime
+    total_cost: float
+    elapsed_seconds: float
+    maintenance_actions: int          # Number of rebases/CI fixes during MONITORING
 
 
 class PipelinePartiallyFailedPayload(BaseModel):
@@ -635,13 +651,18 @@ CREATE TABLE pipelines (
     status TEXT NOT NULL,                    -- PipelineStatus enum
     task_count INTEGER,                      -- Set after decomposition
     tasks_completed INTEGER DEFAULT 0,
-    pr_url TEXT,                             -- Set when PR is opened
+    pr_url TEXT,                             -- Set when feature PR is opened
+    pr_number INTEGER,                       -- GitHub PR number for feature PR
     total_cost NUMERIC(10,4) DEFAULT 0.0,
     learning_mode BOOLEAN DEFAULT true,      -- Whether learning mode is active
     learning_disabled_at_task TEXT,           -- Task ID when learning was turned off
+    feature_branch TEXT,                     -- Feature branch name (e.g., feature/add-auth)
+    target_branch_head TEXT,                 -- Last known HEAD of target branch (for polling)
+    maintenance_actions INTEGER DEFAULT 0,   -- Count of rebases/CI fixes during MONITORING
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     started_at TIMESTAMPTZ,                  -- When Julius was launched
-    completed_at TIMESTAMPTZ,
+    monitoring_at TIMESTAMPTZ,               -- When feature PR opened, entered MONITORING
+    merged_at TIMESTAMPTZ,                   -- When human merged the feature PR
     error TEXT                               -- Failure reason if failed
 );
 

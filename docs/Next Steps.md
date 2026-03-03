@@ -3,7 +3,7 @@
 > **Purpose**: This file tracks where we left off and what to do next. Update it
 > at the end of every session so the next session can pick up seamlessly.
 >
-> **Last updated**: 2026-03-02 (session 6, in progress)
+> **Last updated**: 2026-03-03 (session 7, in progress)
 
 ---
 
@@ -105,21 +105,48 @@
   - Fixed pre-existing inconsistency in spec 18: conflict resolution now shows Leonard
     resolving semantic conflicts (was "mark task needs_human").
   - Updated specs: 01, 13, 18.
+- **Workflow Issue 5 — Parallel pipelines interaction**: Fully resolved. Decisions:
+  - **Resource-based scheduling**: Orchestrator queries container runtime for available
+    resources before each spawn. No static per-agent-type caps (e.g., `max_parallel_leonards`).
+    Adapts to hardware automatically — small machine runs fewer agents, large machine
+    runs more. Works with any deployment topology (managed services invisible to orchestrator).
+  - **FIFO spawn queue**: When resources are insufficient, spawn requests queue up.
+    Queue drains greedily on container exit. First-come, first-served across all
+    pipelines — no starvation by design.
+  - **Proactive feature branch rebase**: Orchestrator polls target branch HEAD every
+    60 seconds. When it advances, spawns one Richelieu per affected feature branch
+    (parallel, each in a temporary worktree). Leonard resolves semantic conflicts.
+    Katherine re-reviews when code changes.
+  - **CI gate before Katherine**: New step 11 in the walkthrough. Orchestrator polls
+    GitHub CI status on task PR after rebase gate. Leonard fixes CI failures.
+    Katherine only reviews code that passes CI.
+  - **CI monitoring during MONITORING**: Same pattern for feature PRs. Leonard fixes
+    CI failures, Katherine reviews fixes.
+  - **Pipeline lifecycle extended**: `COMPLETED` replaced by `MONITORING` → `MERGED`.
+    MONITORING = feature PR open, system actively maintaining branch (rebases, CI,
+    Katherine re-reviews). MERGED = human merged the PR (detected by polling).
+    Terminal state. Walkthrough expanded from 21 to 23 steps.
+  - **All git operations in isolated worktrees**: Task branches use task worktrees
+    (existing). Feature rebases use temporary worktrees (new). `git fetch` serialized
+    globally (new). Cross-branch operations parallel via worktree isolation.
+  - **Pipeline priority**: FIFO for v1. Manual priority → future work.
+  - **Dependent features**: Not supported v1 → future work.
+  - **GitHub webhooks**: Polling for v1. Webhook endpoint → future work.
+  - Updated specs: 01, 02, 13, 14, 15, 18.
+  - Updated: `docs/future-work.md` (3 new items).
 
 ---
 
 ## Where We Left Off
 
-**Continuing workflow spec (01) deep-dive.** Issues 1-4 are resolved. 11 issues
-remain across three categories.
+**Continuing workflow spec (01) deep-dive.** Issues 1-5 are resolved. 10 issues
+remain across two categories.
 
 ### Workflow Spec Issues — Ready for Discussion
 
-#### Category 1: Missing Flows (1 remaining)
+#### Category 1: Missing Flows
 
-**Issue 5 — Parallel pipelines interaction is undefined.**
-Branching model shows Feature A and Feature B in parallel, but: do they share
-parallelism limits? Can they conflict on `main`? What about simultaneous feature PRs?
+All issues resolved (Issues 1-5).
 
 #### Category 2: Ambiguities (7 issues)
 
@@ -171,8 +198,8 @@ Are `max_parallel_leonards: 3` etc. per-pipeline or global across all pipelines?
 | Spec | Status | Notes |
 |------|--------|-------|
 | 00 Overview | **Reviewed** | Done. Updated with orchestrator rename, new project structure, opex.* namespace, revised phases. |
-| 01 Workflow | **In review** | 4/15 issues resolved (Issues 1-4). 11 remaining. |
-| 02 Data Models | **Updated** | New: TaskStatus states, PipelineStatus states, RetryConfig, task_attempts, task_context_entries, diagnostic_chat tables. Needs full review after spec 01 completes. |
+| 01 Workflow | **In review** | 5/15 issues resolved (Issues 1-5). 10 remaining. CI gate, MONITORING→MERGED lifecycle, resource-based scheduling, feature branch maintenance. |
+| 02 Data Models | **Updated** | New: TaskStatus states, PipelineStatus states (MONITORING, MERGED), RetryConfig, task_attempts, task_context_entries, diagnostic_chat tables, PipelineMonitoringPayload, PipelineMergedPayload. Pipelines table extended with feature_branch, target_branch_head, maintenance_actions, monitoring_at, merged_at. Needs full review after spec 01 completes. |
 | 03 Learning & Principles | Needs review | Verify Extract→Replay→Verify loop is fully specified. |
 | 04 Communication | Needs review | Check message types match orchestrator routing table. |
 | 05 Infrastructure | Needs review | Docker Compose is canonical. Check for consistency. |
@@ -183,12 +210,12 @@ Are `max_parallel_leonards: 3` etc. per-pipeline or global across all pipelines?
 | 10 Testing | Needs review | VCR, testcontainers. |
 | 11 Dev Standards | Needs review | ruff, mypy, coverage. |
 | 12 Repo Connection | Needs review | GitHub auth, .opex.yaml full schema. |
-| 13 Orchestrator | **Updated** | Consistency fixes (FAILED→PARTIALLY_FAILED, CONTROLLER_→ORCHESTRATOR_). Added CANCELLING state, cancellation + cleanup routing. Updated startup reconciliation. Rebase gate in routing table + walkthrough (Issue 4). Needs full review. |
+| 13 Orchestrator | **Updated** | Consistency fixes (FAILED→PARTIALLY_FAILED, CONTROLLER_→ORCHESTRATOR_). Added CANCELLING state, cancellation + cleanup routing. Updated startup reconciliation. Rebase gate (Issue 4). Resource-based scheduling + spawn queue (replaces static parallelism caps). Monitoring loop (poll target branch, CI, PR merge). New routing table entries: ci_check_failed, target_branch_advanced, pr_merged, pipeline_monitoring, pipeline_merged. MONITORING/MERGED states. Needs full review. |
 | 14 API Server | **Updated** | Added human intervention endpoints, cleanup endpoint, attention queue endpoints, webhook notifications (config + payload + Grafana alternative), escalation SSE events, updated capabilities table. Still has TODOs for schemas/error format. |
 | 15 TUI | **Updated** | Dashboard as default screen (replaces Pipeline Overview). Attention Queue as dedicated screen with severity levels and in-place actions. Diagnostic chat mockups, human intervention actions, diff view, cancelled pipeline cleanup mockup. Still has TODOs for keybindings/principle browser. |
 | 16 Nelson | Mostly complete | Full consensus algorithm. Needs prompt/tool review. |
 | 17 Julius | **Has TODOs** | System prompt, PydanticAI tools, decomposition examples. |
-| 18 Richelieu | **Updated** | Git operations well-defined. Conflict resolution updated with rebase gate trigger + Leonard semantic resolution (Issue 4). Needs prompt/tool review. |
+| 18 Richelieu | **Updated** | Git operations well-defined. Conflict resolution: rebase gate trigger + Leonard semantic resolution (Issue 4). New: `rebase_feature_branch` operation with temp worktrees (Issue 5). Serialization rules table (per-branch, global fetch, cross-branch parallel). Worktree layout updated with rebase worktrees. Needs prompt/tool review. |
 | 19 Sherlock | **Has TODOs** | System prompt, PydanticAI tools, enrichment examples. |
 | 20 Leonard | **Has TODOs** | System prompt, PydanticAI tools, implementation examples. |
 | 21 Katherine | **Has TODOs** | System prompt, PydanticAI tools, review criteria detail. Add `verify_prerequisites` mode. |
@@ -250,9 +277,9 @@ Planning principles and other reusable knowledge are stored in the
 
 ## Suggested Next Session Plan
 
-### Step 1: Continue the 12 remaining Workflow issues (one by one)
-Resume with Issue 4 (post-merge conflict resolution). Use planning principles to
-validate decisions. Update specs after each resolution.
+### Step 1: Continue the 10 remaining Workflow issues (one by one)
+Resume with Issue 6 (TUI → API → pipeline, not TUI → Redis). Use planning principles
+to validate decisions. Update specs after each resolution.
 
 ### Step 2: Deep-dive Data Models (spec 02)
 Verify every PostgreSQL table and Pydantic model matches the decisions from all specs.
@@ -280,3 +307,4 @@ Create a detailed Phase 0 implementation plan.
 | 2026-03-01 (s3) | Created `knowledge_base/planning-principles.md` (8 principles: P1–P8). Resolved Workflow Issue 1 (failure scenarios) with 14 sub-decisions. Key design: no auto-FAILED state (P8), task-level failure isolation, PARTIALLY_FAILED pipeline state, diagnostic chat for human intervention, two abandon modes, Katherine verify_prerequisites mode. Updated specs 01, 02, 08, 14, 15. |
 | 2026-03-02 (s4) | Resolved Workflow Issue 2 (pipeline cancellation). Key design: cooperative cancellation via orchestrator-only logic (P9 — Stability Over Wasted Work). Agents finish atomic operations, orchestrator stops dispatching. CANCELLING transitional state. PRs preserved, cleanup via TUI. Consistency fixes in spec 13 (FAILED→PARTIALLY_FAILED, CONTROLLER_→ORCHESTRATOR_). Added P9 to planning principles. Created `docs/future-work.md`. Updated specs 01, 02, 13, 14, 15. |
 | 2026-03-02 (s5) | Resolved Workflow Issue 3 (NEEDS_HUMAN notification). Key design: configurable webhook for out-of-band alerting (deployment-level config, fire-and-forget POST). TUI Dashboard as default screen with Attention Queue (persistent, severity-leveled, auto-resolving). `system:escalations` Redis Stream as single event bus for SSE + webhooks. Grafana alerting as ops-native alternative. Updated specs 01, 14, 15. |
+| 2026-03-03 (s7) | Resolved Workflow Issue 5 (parallel pipelines). Key design: resource-based scheduling (query runtime before spawn, no static caps) + FIFO spawn queue. Proactive feature branch rebase via polling (60s). CI gate before Katherine (task PRs) + CI monitoring (feature PRs). Pipeline lifecycle extended: MONITORING → MERGED replaces COMPLETED. All git ops in isolated worktrees; git fetch serialized globally. Richelieu `rebase_feature_branch` operation with temp worktrees. Future work: GitHub webhooks, pipeline priority, dependent features. Updated specs 01, 02, 13, 15, 18. Updated `docs/future-work.md` (3 new items). |

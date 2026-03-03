@@ -368,7 +368,10 @@ The orchestrator's full dispatch table. Every message type from spec 04 is accou
 | `git_request`              | `pipeline:{id}:git_ops`       | Spawn Richelieu for this operation (serialize per-branch) |
 | `branch_merged`            | `pipeline:{id}:git_ops`       | Mark task `completed`; check `get_ready_tasks()` → spawn Sherlocks for newly unblocked tasks; if all tasks done → emit `all_tasks_complete` |
 | `all_tasks_complete`       | (self-emitted)                | Spawn Richelieu (`open_pr`)                               |
-| `pr_opened`                | `pipeline:{id}:git_ops`       | Mark pipeline `completed`; emit `pipeline_completed`      |
+| `pr_opened`                | `pipeline:{id}:git_ops`       | Mark pipeline `MONITORING`; emit `pipeline_monitoring`; start monitoring loop (poll target branch, CI, PR merge status) |
+| `ci_check_failed`          | (detected by monitoring poll) | Spawn Leonard to fix CI failure; Katherine reviews fix. Retry limit: `ci_fix_max_attempts` before NEEDS_HUMAN |
+| `target_branch_advanced`   | (detected by monitoring poll) | Spawn Richelieu (rebase feature branch in temp worktree). Leonard resolves semantic conflicts. Katherine reviews delta. |
+| `pr_merged`                | (detected by monitoring poll) | Mark pipeline `MERGED`; emit `pipeline_merged`. Terminal state. |
 | `pipeline_partially_failed`| (self-emitted)                | Mark pipeline `partially_failed`; alert human; preserve state |
 | `pipeline_cancel_requested`| `system:pipelines`            | Pipeline → `CANCELLING`; stop dispatching; wait for all containers to exit naturally; finalize to `CANCELLED` (see spec 01, Option 3) |
 | `pipeline_cleanup_requested`| `system:pipelines`           | Spawn Richelieu to close open PRs and delete branches for a cancelled pipeline |
@@ -446,12 +449,13 @@ class AllTasksCompletePayload(BaseModel):
     elapsed_seconds: float
 ```
 
-### `pipeline_completed`
+### `pipeline_monitoring`
 
-Published by the orchestrator after the PR is opened successfully.
+Published by the orchestrator when the feature PR is opened and the pipeline enters
+`MONITORING` state. The system will now actively maintain the feature branch.
 
 ```python
-class PipelineCompletedPayload(BaseModel):
+class PipelineMonitoringPayload(BaseModel):
     pipeline_id: str
     pr_url: str
     pr_number: int
@@ -459,6 +463,22 @@ class PipelineCompletedPayload(BaseModel):
     total_cost: float
     elapsed_seconds: float
     human_review_needed: bool
+```
+
+### `pipeline_merged`
+
+Published by the orchestrator when it detects the human has merged the feature PR.
+This is the true terminal state for a successful pipeline.
+
+```python
+class PipelineMergedPayload(BaseModel):
+    pipeline_id: str
+    pr_url: str
+    pr_number: int
+    merged_at: datetime
+    total_cost: float
+    elapsed_seconds: float
+    maintenance_actions: int          # Rebases + CI fixes during MONITORING
 ```
 
 ### `pipeline_partially_failed`
@@ -524,13 +544,15 @@ class PipelineStatus(StrEnum):
     CREATED = "created"              # Plan received, not yet started
     DECOMPOSING = "decomposing"      # Julius is running
     IN_PROGRESS = "in_progress"      # Tasks are being processed
-    COMPLETING = "completing"        # All tasks done, opening PR
-    COMPLETED = "completed"          # PR opened
+    COMPLETING = "completing"        # All tasks done, opening feature PR
+    MONITORING = "monitoring"        # Feature PR open; system actively maintains branch
+                                     # (rebases, CI fixes, Katherine re-reviews)
+    MERGED = "merged"                # Human merged the feature PR. Pipeline truly done.
     PARTIALLY_FAILED = "partially_failed"  # Some tasks need human intervention
     CANCELLING = "cancelling"        # Human requested cancel, waiting for containers to exit
     CANCELLED = "cancelled"          # All containers exited, cancellation finalized
     # NOTE: There is no FAILED state. See spec 01 (P8 — No Silent Failures).
-    # PARTIALLY_FAILED can recover via retry or human takeover → COMPLETED,
+    # PARTIALLY_FAILED can recover via retry or human takeover → MONITORING,
     # or be explicitly cancelled by the human → CANCELLED.
 ```
 
@@ -538,107 +560,9 @@ class PipelineStatus(StrEnum):
 
 ## Complete Event Flow: End-to-End Pipeline
 
-A 21-step walkthrough of a typical pipeline from plan submission to PR.
+A 23-step walkthrough of a typical pipeline from plan submission to merged PR.
 This is a mirror of the canonical walkthrough in spec 01 (Workflow).
-
-```mermaid
-sequenceDiagram
-    participant Human
-    participant TUI
-    participant Orch as Orchestrator
-    participant Redis
-    participant PG as PostgreSQL
-    participant Rich as Richelieu
-    participant Jul as Julius
-    participant Nel as Nelson
-    participant Sher as Sherlock
-    participant Leo as Leonard
-    participant Kat as Katherine
-
-    Note over Human, Kat: 1-2. Plan submission & pipeline creation
-    Human->>TUI: Submit plan
-    TUI->>Redis: pipeline_created
-    Orch->>PG: Create pipeline (CREATED)
-    Orch->>Rich: Spawn (create feature branch)
-    Rich->>Redis: git_response (branch name)
-    Rich--xRich: exits
-
-    Note over Human, Kat: 3-4. Decomposition
-    Orch->>PG: Status -> DECOMPOSING
-    Orch->>Jul: Spawn (PIPELINE_ID)
-    Jul->>Redis: consensus_request
-    Orch->>Nel: Spawn for validation
-    Nel->>Redis: consensus_response
-    Nel--xNel: exits
-    Jul->>Redis: task_created (x N)
-    Jul->>Redis: decomposition_complete
-    Jul--xJul: exits
-
-    Note over Human, Kat: 5-6. Dispatch & enrichment
-    Orch->>PG: Store DependencyGraph, status -> IN_PROGRESS
-    Orch->>Sher: Spawn for ready tasks (up to max_parallel)
-    Sher->>Redis: task_enriched
-    Sher--xSher: exits
-
-    Note over Human, Kat: 7-9. Worktree setup & implementation
-    Orch->>PG: Task status -> READY
-    Orch->>Rich: Spawn (create worktree)
-    Rich->>Redis: git_response (worktree path)
-    Rich--xRich: exits
-    Orch->>Leo: Spawn (TASK_ID, worktree, branch)
-    Leo->>Leo: Implement, test, lint, commit
-    Leo->>Redis: implementation_complete
-    Leo--xLeo: exits
-
-    Note over Human, Kat: 10. Branch alignment (rebase gate)
-    Orch->>Orch: Feature branch advanced since task branched?
-    opt rebase needed
-        Orch->>Rich: Spawn (rebase task branch onto feature)
-        Rich->>Redis: git_response (rebase result)
-        Rich--xRich: exits
-        Note right of Rich: Clean/trivial → continue to step 11<br/>Semantic conflict → Leonard resolves, retry gate<br/>Unresolvable → task NEEDS_HUMAN
-    end
-
-    Note over Human, Kat: 11-13. Review
-    Orch->>PG: Task status -> IN_REVIEW
-    Orch->>Kat: Spawn (TASK_ID)
-    Kat->>Redis: consensus_request
-    Orch->>Nel: Spawn for review
-    Nel->>Redis: consensus_response
-    Nel--xNel: exits
-    Kat->>Redis: review_result
-    Kat--xKat: exits
-
-    alt approved
-        Orch->>Redis: git_request:merge_branch
-    else changes_requested
-        Orch->>PG: Task status -> REWORK
-        Note right of Orch: Respawn Leonard (go to step 9)<br/>Rebase gate (step 10) runs again after Leonard
-    else escalated
-        Orch->>PG: Task status -> NEEDS_HUMAN
-        Orch->>Redis: escalation to human_input
-    end
-
-    Note over Human, Kat: 14-16. Merge & dependency dispatch
-    Orch->>Rich: Spawn (merge task -> feature branch)
-    Rich->>Redis: git_response (merge result)
-    Rich--xRich: exits
-    Orch->>PG: Task status -> COMPLETED
-    Orch->>Orch: Evaluate get_ready_tasks()
-    Note right of Orch: More ready -> spawn Sherlocks (step 6)<br/>All complete -> continue to step 17
-
-    Note over Human, Kat: 17-20. Pipeline completion
-    Orch->>Redis: all_tasks_complete
-    Orch->>PG: Status -> COMPLETING
-    Orch->>Rich: Spawn (open PR: feature -> target)
-    Rich->>Redis: git_response (PR URL)
-    Rich--xRich: exits
-    Orch->>PG: Status -> COMPLETED
-    Orch->>Redis: pipeline_completed
-
-    Note over Human, Kat: 21. Human review
-    TUI->>Human: Pipeline summary with link to PR
-```
+See spec 01 for the full annotated version.
 
 ---
 
@@ -786,6 +710,110 @@ mechanisms above. Graceful shutdown simply avoids wasting in-flight agent work.
 
 ---
 
+## Resource-Based Scheduling
+
+The orchestrator uses **resource-based admission control** instead of static per-agent-type
+caps. This approach adapts to any deployment size — from a small machine running one
+pipeline to a large server running many in parallel.
+
+### How it works
+
+Before spawning any agent container, the orchestrator:
+
+1. **Queries the container runtime** (Docker API) for available CPU and memory.
+2. **Compares** against the agent's resource profile (spec 05 — Resource Limits).
+3. **If sufficient** → spawn immediately.
+4. **If insufficient** → enqueue the spawn request in the FIFO spawn queue.
+
+When any container exits, the orchestrator drains the spawn queue greedily — spawning
+as many queued requests as resources allow.
+
+```python
+@dataclass
+class SpawnRequest:
+    """Queued request to spawn an agent container."""
+    agent: AgentName
+    pipeline_id: str
+    task_id: str | None
+    env: dict[str, str]
+    enqueued_at: datetime
+```
+
+### Why not static caps?
+
+A static `max_parallel_leonards: 3` is a guess that's wrong for most deployments.
+A 4-CPU machine can barely run 2 Leonards (2 CPU each). A 32-CPU machine could
+comfortably run 16. Resource-based scheduling adapts to the actual hardware
+without manual tuning.
+
+### Managed services
+
+If infrastructure services (PostgreSQL, Redis, Loki) are externally managed
+(e.g., Cloud SQL, ElastiCache, Grafana Cloud), they consume zero local resources.
+The orchestrator naturally sees more available capacity for agents. No special
+configuration is needed — the runtime query only sees local containers.
+
+### Richelieu serialization
+
+Separate from resource scheduling, Richelieu has **correctness constraints** that
+are always enforced:
+
+- **Per-branch**: Operations on the same branch are serialized (concurrent git ops
+  on the same branch corrupt state).
+- **Global**: `git fetch origin` is serialized across all branches (concurrent fetches
+  can corrupt the pack index).
+- **Cross-branch**: Parallel via isolated worktrees (each branch operation runs in its
+  own worktree with independent index and working directory).
+
+---
+
+## Monitoring Loop (MONITORING State)
+
+When a pipeline enters `MONITORING`, the orchestrator starts a periodic monitoring
+loop for that pipeline. See spec 01 — Feature Branch Maintenance for the full design.
+
+### Poll targets
+
+Every `monitoring_poll_interval_seconds` (default: 60), the orchestrator checks:
+
+1. **Target branch HEAD** — `git ls-remote origin {target_branch}`. If advanced since
+   last known HEAD → spawn Richelieu to rebase the feature branch (in a temp worktree).
+2. **CI status** — GitHub API `GET /repos/{owner}/{repo}/commits/{sha}/status` on the
+   feature PR HEAD. If failed → spawn Leonard to fix.
+3. **PR merge status** — GitHub API `GET /repos/{owner}/{repo}/pulls/{number}`. If
+   merged → pipeline → `MERGED`.
+
+### Conflict resolution during rebase
+
+When Richelieu reports a semantic conflict during feature branch rebase:
+
+1. Orchestrator spawns Leonard with the conflict context (both sides of the diff).
+2. Leonard resolves the conflict and commits.
+3. Richelieu force-pushes the rebased feature branch.
+4. Katherine reviews the delta (diff before vs. after rebase).
+5. If Katherine requests changes → Leonard fixes → Katherine re-reviews.
+6. If resolution fails → `NEEDS_HUMAN` (attention queue item, severity HIGH).
+
+### CI fix during monitoring
+
+When CI fails on the feature PR:
+
+1. Orchestrator spawns Leonard with the CI failure logs.
+2. Leonard diagnoses and fixes. Richelieu pushes the fix.
+3. Katherine reviews the fix.
+4. CI re-runs. If passes → done. If fails → retry up to `ci_fix_max_attempts`.
+5. After max attempts → `NEEDS_HUMAN`.
+
+### Monitoring termination
+
+The monitoring loop stops when:
+- Pipeline → `MERGED` (human merged the PR — success)
+- Pipeline → `CANCELLING` (human cancelled)
+- Pipeline enters a state that requires human intervention and all maintenance
+  actions are blocked (edge case — attention queue surfaces this)
+
+---
+
 ## Configuration
 
 ```python
@@ -800,12 +828,8 @@ class OrchestratorConfig(BaseSettings):
     consumer_name: str = "orchestrator-1"
     stream_block_ms: int = 5000
 
-    # Parallelism (per agent type)
-    max_parallel_nelsons: int = 5
-    max_parallel_sherlocks: int = 5
-    max_parallel_leonards: int = 3
-    max_parallel_katherines: int = 3
-    max_parallel_richelieus: int = 3       # Serialized per-branch, parallel across branches
+    # Scheduling — resource-based (no static per-agent-type caps)
+    # See "Resource-Based Scheduling" section below.
 
     # Watchdog
     watchdog_interval_seconds: int = 15
@@ -825,6 +849,10 @@ class OrchestratorConfig(BaseSettings):
 
     # Pipeline error threshold (consecutive errors before pausing)
     pipeline_error_threshold: int = 5
+
+    # Monitoring (for MONITORING state — see spec 01)
+    monitoring_poll_interval_seconds: int = 60   # Poll target branch + CI + PR status
+    ci_fix_max_attempts: int = 3                 # Max Leonard spawns for CI fixes before NEEDS_HUMAN
 
     model_config = SettingsConfigDict(env_prefix="ORCHESTRATOR_")
 ```

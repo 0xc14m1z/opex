@@ -120,9 +120,10 @@ from `GET /attention`, `GET /pipelines`, `GET /health`, and
 │  ┌─ Active Pipelines (2) ───────────────────────────────────────┐  │
 │  │                                                               │  │
 │  │  feature/add-auth    IN_PROGRESS  3/5 tasks   $4.82  ⚠      │  │
-│  │  feature/fix-perf    LEARNING     1/3 tasks   $1.20          │  │
+│  │  feature/fix-perf    MONITORING   PR #107     $3.40  ✓ CI   │  │
+│  │  feature/refactor    MERGED       PR #98      $2.10          │  │
 │  │                                                               │  │
-│  │  Completed today: 1    Cancelled: 0                          │  │
+│  │  Merged today: 1    Cancelled: 0                             │  │
 │  │                                                               │  │
 │  │  [Enter] Open pipeline  [N]ew pipeline                       │  │
 │  └──────────────────────────────────────────────────────────────┘  │
@@ -329,8 +330,8 @@ connection string and independent pipeline state.
 ├─ my-app: Pipelines ─────────────────────────────────────┤
 │                                                          │
 │  pipe-abc  feature/add-auth   IN_PROGRESS  3/5 tasks    │
-│  pipe-def  feature/fix-perf   LEARNING     1/3 tasks    │
-│  pipe-ghi  feature/refactor   COMPLETED    PR #42       │
+│  pipe-def  feature/fix-perf   MONITORING   PR #107      │
+│  pipe-ghi  feature/refactor   MERGED       PR #42       │
 │                                                          │
 ├─ pipe-def: Learning Mode ────────────────────────────────┤
 │                                                          │

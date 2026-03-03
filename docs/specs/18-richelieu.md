@@ -33,7 +33,10 @@ Richelieu is one of only two agents with write access to the filesystem
 
 - **Spawned when**: A `git_request` message appears on `pipeline:{id}:git_ops` (see spec 13-orchestrator).
 - **Exits when**: Publishes a `git_response` to `pipeline:{id}:git_ops`.
-- **Parallelism**: 1 per branch (serialized). Multiple Richelieu instances can run in parallel across different branches, but operations on the same branch are serialized by the orchestrator to prevent race conditions.
+- **Parallelism**: Serialized per-branch, parallel across branches. Multiple Richelieu
+  instances can run in parallel on different branches (each in its own worktree), but
+  operations on the same branch are serialized by the orchestrator to prevent race
+  conditions. `git fetch origin` is serialized globally (see below).
 
 ---
 
@@ -50,7 +53,8 @@ Richelieu is one of only two agents with write access to the filesystem
   - `merge_branch`
   - `open_task_pr`
   - `open_feature_pr`
-  - `rebase_branch`
+  - `rebase_branch` (task branch onto feature branch — rebase gate)
+  - `rebase_feature_branch` (feature branch onto target branch — monitoring)
   - `remove_worktree`
   - `fetch_origin`
 
@@ -132,10 +136,53 @@ if the task branch is behind the feature branch at merge time (defense in depth)
 2. Delete the task branch locally (remote branch is preserved until PR is merged/closed).
 3. Publish `git_response` confirming cleanup.
 
+### Operation: `rebase_feature_branch`
+
+**Trigger**: The orchestrator's monitoring loop (spec 01, Feature Branch Maintenance)
+detects that the target branch (e.g., `main`) has advanced since the feature branch
+was last rebased.
+
+1. Create a **temporary worktree** at `/workspace/.worktrees/rebase--{feature-name}/`.
+   This isolates the rebase from all other operations on the shared clone.
+2. Check out the feature branch in the temporary worktree.
+3. Run `git rebase origin/{target_branch}`.
+4. If rebase succeeds: `git push --force-with-lease origin {feature_branch}`.
+5. If rebase conflicts: classify as trivial or semantic (same logic as `rebase_branch`).
+   Trivial → resolve mechanically, force-push. Semantic → report to orchestrator
+   (Leonard resolves, see spec 01).
+6. If code changed (not just fast-forward), flag for Katherine re-review.
+7. Remove the temporary worktree.
+8. Publish `git_response` with rebase result.
+
+**Temporary worktree isolation**: Each feature branch rebase runs in its own temporary
+worktree. Multiple feature rebases can run in parallel safely because they have
+independent working directories and indices. The temporary worktree is cleaned up
+after the operation completes (or on failure).
+
 ### Operation: `fetch_origin`
 
 1. Run `git fetch origin --prune`.
 2. Publish `git_response` confirming fetch completed.
+
+> **Serialization**: `fetch_origin` is serialized **globally** across all branches
+> and pipelines. Concurrent fetches can corrupt the pack index. This is enforced by
+> the orchestrator, not by Richelieu — the orchestrator ensures only one `fetch_origin`
+> request is in flight at a time. Since fetches are fast (seconds), this is a negligible
+> bottleneck.
+
+---
+
+## Serialization Rules
+
+All git operations are performed in **isolated worktrees** (task worktrees for task
+operations, temporary worktrees for feature rebases). This prevents concurrent operations
+from interfering with each other's working directory or index.
+
+| Rule | Scope | Enforced by | Rationale |
+|------|-------|-------------|-----------|
+| Per-branch serialization | Same branch | Orchestrator | Two git ops on the same branch can corrupt refs |
+| Global fetch serialization | `fetch_origin` | Orchestrator | Concurrent fetches can corrupt pack index |
+| Cross-branch parallelism | Different branches | Worktree isolation | Independent indices and working directories |
 
 ---
 
@@ -169,10 +216,15 @@ All task PRs merged -> PR #107: feature/fix-perf -> main
 ```
 /workspace/                              # Main clone, checked out on default branch
 /workspace/.worktrees/
-  add-auth--task-1/                      # Worktree on opex/add-auth/task-1
-  add-auth--task-2/                      # Worktree on opex/add-auth/task-2
-  fix-perf--task-4/                      # Worktree on opex/fix-perf/task-4
+  add-auth--task-1/                      # Task worktree on opex/add-auth/task-1
+  add-auth--task-2/                      # Task worktree on opex/add-auth/task-2
+  fix-perf--task-4/                      # Task worktree on opex/fix-perf/task-4
+  rebase--add-auth/                      # Temp worktree for feature branch rebase (monitoring)
+  rebase--fix-perf/                      # Temp worktree for feature branch rebase (monitoring)
 ```
+
+Temporary rebase worktrees (`rebase--*`) are created and destroyed within a single
+`rebase_feature_branch` operation. They exist only for the duration of the rebase.
 
 ### Branching Rules
 
